@@ -1,5 +1,5 @@
 # Retryable dns resolver
-Based on based on miekg/dns and freely inspired by https://github.com/bogdanovich/dns_resolver.
+Based on based on `miekg/dns` and freely inspired by `bogdanovich/dns_resolver`.
 
 ## Features
 - Supports system default resolvers along with user supplied ones
