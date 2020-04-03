@@ -13,7 +13,7 @@ Based on based on `miekg/dns` and freely inspired by `bogdanovich/dns_resolver`.
 $ go get github.com/projectdiscovery/retryabledns
 ```
 
-After this command *retryabledns* is ready to use as the source will be in your $GOPATH
+After this command *retryabledns* library source will be in your $GOPATH
 
 ## Example
 Usage Example:
@@ -23,7 +23,7 @@ package main
 
 import (
     "log"
-    "github.com/projectdiscovery/retryabledns"
+    dns "github.com/projectdiscovery/retryabledns"
 )
 
 func main() {
