@@ -121,6 +121,27 @@ func (c *Client) ResolveRaw(host string, requestType uint16) (results []string, 
 	return results, err
 }
 
+// Do sends a provided dns request and return the raw native response
+func (c *Client) Do(msg *dns.Msg) (resp *dns.Msg, err error) {
+	resolver := c.resolvers[rand.Intn(len(c.resolvers))]
+
+	var answer *dns.Msg
+
+	for i := 0; i < c.maxRetries; i++ {
+		answer, err = dns.Exchange(msg, resolver)
+		if err != nil {
+			continue
+		}
+
+		// In case we get a non empty answer stop retrying
+		if answer != nil {
+			return answer, nil
+		}
+	}
+
+	return nil, err
+}
+
 func parse(answer *dns.Msg, requestType uint16) (results []string) {
 	for _, record := range answer.Answer {
 		switch requestType {
