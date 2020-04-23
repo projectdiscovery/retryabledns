@@ -54,7 +54,6 @@ func (c *Client) Resolve(host string) (Result, error) {
 		Qtype:  dns.TypeA,
 		Qclass: dns.ClassINET,
 	}
-	resolver := c.resolvers[rand.Intn(len(c.resolvers))]
 
 	var err error
 	var answer *dns.Msg
@@ -62,6 +61,8 @@ func (c *Client) Resolve(host string) (Result, error) {
 	result := Result{}
 
 	for i := 0; i < c.maxRetries; i++ {
+		resolver := c.resolvers[rand.Intn(len(c.resolvers))]
+
 		answer, err = dns.Exchange(msg, resolver)
 		if err != nil {
 			continue
@@ -98,11 +99,11 @@ func (c *Client) ResolveRaw(host string, requestType uint16) (results []string, 
 		Qtype:  requestType,
 		Qclass: dns.ClassINET,
 	}
-	resolver := c.resolvers[rand.Intn(len(c.resolvers))]
 
 	var answer *dns.Msg
 
 	for i := 0; i < c.maxRetries; i++ {
+		resolver := c.resolvers[rand.Intn(len(c.resolvers))]
 		answer, err = dns.Exchange(msg, resolver)
 		if err != nil {
 			continue
@@ -123,23 +124,21 @@ func (c *Client) ResolveRaw(host string, requestType uint16) (results []string, 
 
 // Do sends a provided dns request and return the raw native response
 func (c *Client) Do(msg *dns.Msg) (resp *dns.Msg, err error) {
-	resolver := c.resolvers[rand.Intn(len(c.resolvers))]
-
-	var answer *dns.Msg
 
 	for i := 0; i < c.maxRetries; i++ {
-		answer, err = dns.Exchange(msg, resolver)
+		resolver := c.resolvers[rand.Intn(len(c.resolvers))]
+		resp, err = dns.Exchange(msg, resolver)
 		if err != nil {
 			continue
 		}
 
 		// In case we get a non empty answer stop retrying
-		if answer != nil {
-			return answer, nil
+		if resp != nil {
+			return
 		}
 	}
 
-	return nil, err
+	return
 }
 
 func parse(answer *dns.Msg, requestType uint16) (results []string) {
