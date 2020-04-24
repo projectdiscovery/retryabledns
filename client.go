@@ -2,6 +2,7 @@ package dns
 
 import (
 	"errors"
+	"fmt"
 	"math/rand"
 	"time"
 
@@ -29,10 +30,9 @@ func New(baseResolvers []string, maxRetries int) (*Client, error) {
 
 	client := Client{maxRetries: maxRetries}
 
-	// Attempt to retrieve the resolvers from the resolv.conf file on Linux/Unix
-	// ignoring errors as it would return an empty list
-	resolvers, _ := ReadResolveConfig("/etc/resolv.conf")
-	client.resolvers = append(client.resolvers, resolvers...)
+	if len(baseResolvers) == 0 {
+		return nil, fmt.Errorf("No resolvers provided")
+	}
 
 	// Append the static list of resolvers if they were given as input to the
 	// resolvers array.
