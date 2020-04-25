@@ -88,7 +88,7 @@ func (c *Client) Resolve(host string) (Result, error) {
 
 // ResolveRaw is the underlying resolve function that actually resolves a host
 // and gets the raw records for that host.
-func (c *Client) ResolveRaw(host string, requestType uint16) (results []string, err error) {
+func (c *Client) ResolveRaw(host string, requestType uint16) (results []string, raw string, err error) {
 	msg := new(dns.Msg)
 
 	msg.Id = dns.Id()
@@ -105,21 +105,24 @@ func (c *Client) ResolveRaw(host string, requestType uint16) (results []string, 
 	for i := 0; i < c.maxRetries; i++ {
 		resolver := c.resolvers[rand.Intn(len(c.resolvers))]
 		answer, err = dns.Exchange(msg, resolver)
+		if answer != nil {
+			raw = answer.String()
+		}
 		if err != nil {
 			continue
 		}
 
 		// In case we got some error from the server, return.
 		if answer != nil && answer.Rcode != dns.RcodeSuccess {
-			return results, errors.New(dns.RcodeToString[answer.Rcode])
+			return results, raw, errors.New(dns.RcodeToString[answer.Rcode])
 		}
 
 		results = append(results, parse(answer, requestType)...)
 
-		return results, nil
+		return results, raw, nil
 	}
 
-	return results, err
+	return results, raw, err
 }
 
 // Do sends a provided dns request and return the raw native response
