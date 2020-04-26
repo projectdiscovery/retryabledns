@@ -2,8 +2,8 @@ package dns
 
 import (
 	"errors"
-	"fmt"
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/miekg/dns"
@@ -15,6 +15,8 @@ const defaultPort = "53"
 type Client struct {
 	resolvers  []string
 	maxRetries int
+	rand       *rand.Rand
+	mutex      *sync.Mutex
 }
 
 // Result contains the results from a DNS resolution
@@ -24,21 +26,14 @@ type Result struct {
 }
 
 // New creates a new dns client
-func New(baseResolvers []string, maxRetries int) (*Client, error) {
-	// Seed the global RNG
-	rand.Seed(time.Now().UnixNano())
-
-	client := Client{maxRetries: maxRetries}
-
-	if len(baseResolvers) == 0 {
-		return nil, fmt.Errorf("No resolvers provided")
+func New(baseResolvers []string, maxRetries int) *Client {
+	client := Client{
+		rand:       rand.New(rand.NewSource(time.Now().UnixNano())),
+		mutex:      &sync.Mutex{},
+		maxRetries: maxRetries,
+		resolvers:  baseResolvers,
 	}
-
-	// Append the static list of resolvers if they were given as input to the
-	// resolvers array.
-	client.resolvers = append(client.resolvers, baseResolvers...)
-
-	return &client, nil
+	return &client
 }
 
 // Resolve is the underlying resolve function that actually resolves a host
@@ -61,7 +56,9 @@ func (c *Client) Resolve(host string) (Result, error) {
 	result := Result{}
 
 	for i := 0; i < c.maxRetries; i++ {
-		resolver := c.resolvers[rand.Intn(len(c.resolvers))]
+		c.mutex.Lock()
+		resolver := c.resolvers[c.rand.Intn(len(c.resolvers))]
+		c.mutex.Unlock()
 
 		answer, err = dns.Exchange(msg, resolver)
 		if err != nil {
@@ -103,7 +100,10 @@ func (c *Client) ResolveRaw(host string, requestType uint16) (results []string, 
 	var answer *dns.Msg
 
 	for i := 0; i < c.maxRetries; i++ {
-		resolver := c.resolvers[rand.Intn(len(c.resolvers))]
+		c.mutex.Lock()
+		resolver := c.resolvers[c.rand.Intn(len(c.resolvers))]
+		c.mutex.Unlock()
+
 		answer, err = dns.Exchange(msg, resolver)
 		if answer != nil {
 			raw = answer.String()
