@@ -103,43 +103,7 @@ func (c *Client) Do(msg *dns.Msg) (resp *dns.Msg, err error) {
 
 // Query sends a provided dns request and return enriched response
 func (c *Client) Query(host string, requestType uint16) (*DNSData, error) {
-	var (
-		dnsdata DNSData
-		err     error
-		msg     dns.Msg
-	)
-
-	msg.Id = dns.Id()
-	msg.RecursionDesired = true
-	msg.Question = make([]dns.Question, 1)
-	msg.Question[0] = dns.Question{
-		Name:   dns.Fqdn(host),
-		Qtype:  requestType,
-		Qclass: dns.ClassINET,
-	}
-
-	for i := 0; i < c.maxRetries; i++ {
-		resolver := c.resolvers[rand.Intn(len(c.resolvers))]
-		var resp *dns.Msg
-		resp, err = dns.Exchange(&msg, resolver)
-		if err != nil {
-			continue
-		}
-
-		dnsdata.Raw = resp.String()
-		dnsdata.StatusCode = dns.RcodeToString[resp.Rcode]
-		dnsdata.Resolver = append(dnsdata.Resolver, resolver)
-
-		// In case we got some error from the server, return.
-		if resp != nil && resp.Rcode != dns.RcodeSuccess {
-			break
-		}
-
-		dnsdata.ParseFromMsg(resp)
-		break
-	}
-
-	return &dnsdata, err
+	return c.QueryMultiple(host, []uint16{requestType})
 }
 
 // QueryMultiple sends a provided dns request and return the data
@@ -155,8 +119,18 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 	msg.Question = make([]dns.Question, 1)
 
 	for _, requestType := range requestTypes {
+		name := dns.Fqdn(host)
+		// In case of PTR adjust the domain name
+		if requestType == dns.TypePTR {
+			var err error
+			name, err = dns.ReverseAddr(host)
+			if err != nil {
+				return nil, err
+			}
+		}
+
 		msg.Question[0] = dns.Question{
-			Name:   dns.Fqdn(host),
+			Name:   name,
 			Qtype:  requestType,
 			Qclass: dns.ClassINET,
 		}
