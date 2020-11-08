@@ -144,6 +144,47 @@ func (c *Client) Do(msg *dns.Msg) (resp *dns.Msg, err error) {
 	return
 }
 
+// ResolveEnrich sends a provided dns request and return enriched response
+func (c *Client) ResolveEnrich(host string, requestType uint16) (*DNSData, error) {
+	var (
+		dnsdata DNSData
+		err     error
+		msg     dns.Msg
+	)
+
+	msg.Id = dns.Id()
+	msg.RecursionDesired = true
+	msg.Question = make([]dns.Question, 1)
+	msg.Question[0] = dns.Question{
+		Name:   dns.Fqdn(host),
+		Qtype:  requestType,
+		Qclass: dns.ClassINET,
+	}
+
+	for i := 0; i < c.maxRetries; i++ {
+		resolver := c.resolvers[rand.Intn(len(c.resolvers))]
+		var resp *dns.Msg
+		resp, err = dns.Exchange(&msg, resolver)
+		if err != nil {
+			continue
+		}
+
+		dnsdata.Raw = resp.String()
+		dnsdata.StatusCode = dns.RcodeToString[resp.Rcode]
+		dnsdata.Resolver = resolver
+
+		// In case we got some error from the server, return.
+		if resp != nil && resp.Rcode != dns.RcodeSuccess {
+			break
+		}
+
+		dnsdata.ParseFromMsg(resp)
+		break
+	}
+
+	return &dnsdata, err
+}
+
 func parse(answer *dns.Msg, requestType uint16) (results []string) {
 	for _, record := range answer.Answer {
 		switch requestType {
@@ -183,4 +224,46 @@ func parse(answer *dns.Msg, requestType uint16) (results []string) {
 	}
 
 	return
+}
+
+type DNSData struct {
+	Domain     string
+	TTL        int
+	Resolver   string
+	A          []string
+	AAAA       []string
+	CNAME      []string
+	MX         []string
+	PTR        []string
+	SOA        []string
+	NS         []string
+	TXT        []string
+	Raw        string
+	StatusCode string
+}
+
+// ParseFromMsg and enrich data
+func (d *DNSData) ParseFromMsg(msg *dns.Msg) error {
+	for _, record := range msg.Answer {
+		switch record.(type) {
+		case *dns.A:
+			d.A = append(d.A, record.String())
+		case *dns.NS:
+			d.NS = append(d.NS, record.String())
+		case *dns.CNAME:
+			d.CNAME = append(d.CNAME, record.String())
+		case *dns.SOA:
+			d.SOA = append(d.SOA, record.String())
+		case *dns.PTR:
+			d.PTR = append(d.PTR, record.String())
+		case *dns.MX:
+			d.MX = append(d.MX, record.String())
+		case *dns.TXT:
+			d.TXT = append(d.TXT, record.String())
+		case *dns.AAAA:
+			d.AAAA = append(d.AAAA, record.String())
+		}
+	}
+
+	return nil
 }
