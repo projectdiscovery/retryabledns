@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/gob"
 	"encoding/json"
-	"errors"
 	"math/rand"
 	"strings"
 	"sync"
@@ -37,51 +36,7 @@ func New(baseResolvers []string, maxRetries int) *Client {
 // Resolve is the underlying resolve function that actually resolves a host
 // and gets the ip records for that host.
 func (c *Client) Resolve(host string) (*DNSData, error) {
-	msg := new(dns.Msg)
-
-	msg.Id = dns.Id()
-	msg.RecursionDesired = true
-	msg.Question = make([]dns.Question, 1)
-	msg.Question[0] = dns.Question{
-		Name:   dns.Fqdn(host),
-		Qtype:  dns.TypeA,
-		Qclass: dns.ClassINET,
-	}
-
-	var err error
-	var answer *dns.Msg
-
-	dnsdata := &DNSData{}
-
-	for i := 0; i < c.maxRetries; i++ {
-		c.mutex.Lock()
-		resolver := c.resolvers[c.rand.Intn(len(c.resolvers))]
-		c.mutex.Unlock()
-
-		answer, err = dns.Exchange(msg, resolver)
-		if err != nil {
-			continue
-		}
-		dnsdata.Resolver = append(dnsdata.Resolver, resolver)
-		dnsdata.Raw = answer.String()
-		dnsdata.StatusCode = dns.RcodeToString[answer.Rcode]
-
-		// In case we got some error from the server, return.
-		if answer != nil && answer.Rcode != dns.RcodeSuccess {
-			return dnsdata, errors.New(dns.RcodeToString[answer.Rcode])
-		}
-
-		for _, record := range answer.Answer {
-			// Add the IP and the TTL to the map
-			if t, ok := record.(*dns.A); ok {
-				dnsdata.A = append(dnsdata.A, t.A.String())
-				dnsdata.TTL = int(t.Header().Ttl)
-			}
-		}
-		return dnsdata, nil
-	}
-
-	return dnsdata, err
+	return c.Query(host, dns.TypeA)
 }
 
 // Do sends a provided dns request and return the raw native response
