@@ -1,6 +1,8 @@
 package dns
 
 import (
+	"bytes"
+	"encoding/gob"
 	"encoding/json"
 	"errors"
 	"math/rand"
@@ -256,4 +258,24 @@ func (d *DNSData) JSON() (string, error) {
 
 func trimChars(s string) string {
 	return strings.TrimRight(s, ".")
+}
+
+func (r *DNSData) Marshal() ([]byte, error) {
+	var b bytes.Buffer
+	enc := gob.NewEncoder(&b)
+	err := enc.Encode(r)
+	if err != nil {
+		return nil, err
+	}
+
+	return b.Bytes(), nil
+}
+
+func (r *DNSData) Unmarshal(b []byte) error {
+	dec := gob.NewDecoder(bytes.NewBuffer(b))
+	err := dec.Decode(&r)
+	if err != nil {
+		return err
+	}
+	return nil
 }
