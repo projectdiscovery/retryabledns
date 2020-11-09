@@ -120,6 +120,7 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 
 	for _, requestType := range requestTypes {
 		name := dns.Fqdn(host)
+
 		// In case of PTR adjust the domain name
 		if requestType == dns.TypePTR {
 			var err error
@@ -127,13 +128,16 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 			if err != nil {
 				return nil, err
 			}
+			msg.SetEdns0(4096, false)
 		}
 
-		msg.Question[0] = dns.Question{
+		question := dns.Question{
 			Name:   name,
 			Qtype:  requestType,
 			Qclass: dns.ClassINET,
 		}
+		msg.Question[0] = question
+
 		for i := 0; i < c.maxRetries; i++ {
 			resolver := c.resolvers[rand.Intn(len(c.resolvers))]
 			var resp *dns.Msg
