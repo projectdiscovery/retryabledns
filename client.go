@@ -36,7 +36,7 @@ func New(baseResolvers []string, maxRetries int) *Client {
 
 // Resolve is the underlying resolve function that actually resolves a host
 // and gets the ip records for that host.
-func (c *Client) Resolve(host string) (DNSData, error) {
+func (c *Client) Resolve(host string) (*DNSData, error) {
 	msg := new(dns.Msg)
 
 	msg.Id = dns.Id()
@@ -51,7 +51,7 @@ func (c *Client) Resolve(host string) (DNSData, error) {
 	var err error
 	var answer *dns.Msg
 
-	dnsdata := DNSData{}
+	dnsdata := &DNSData{}
 
 	for i := 0; i < c.maxRetries; i++ {
 		c.mutex.Lock()
