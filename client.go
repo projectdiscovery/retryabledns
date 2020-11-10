@@ -1,4 +1,4 @@
-package dns
+package retryabledns
 
 import (
 	"bytes"
@@ -103,6 +103,7 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 				continue
 			}
 
+			dnsdata.Domain = host
 			dnsdata.Raw += resp.String()
 			dnsdata.StatusCode = dns.RcodeToString[resp.Rcode]
 			dnsdata.Resolver = append(dnsdata.Resolver, resolver)
