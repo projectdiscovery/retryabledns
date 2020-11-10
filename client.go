@@ -5,6 +5,8 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"math/rand"
+	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -118,6 +120,8 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 		}
 	}
 
+	dnsdata.dedupe()
+
 	return &dnsdata, err
 }
 
@@ -216,6 +220,19 @@ func trimChars(s string) string {
 	return strings.TrimRight(s, ".")
 }
 
+func (r *DNSData) dedupe() {
+	// dedupe all records
+	dedupeSlice(&r.Resolver, less(&r.Resolver))
+	dedupeSlice(&r.A, less(&r.Resolver))
+	dedupeSlice(&r.AAAA, less(&r.Resolver))
+	dedupeSlice(&r.CNAME, less(&r.Resolver))
+	dedupeSlice(&r.MX, less(&r.Resolver))
+	dedupeSlice(&r.PTR, less(&r.Resolver))
+	dedupeSlice(&r.SOA, less(&r.Resolver))
+	dedupeSlice(&r.NS, less(&r.Resolver))
+	dedupeSlice(&r.TXT, less(&r.Resolver))
+}
+
 func (r *DNSData) Marshal() ([]byte, error) {
 	var b bytes.Buffer
 	enc := gob.NewEncoder(&b)
@@ -234,4 +251,28 @@ func (r *DNSData) Unmarshal(b []byte) error {
 		return err
 	}
 	return nil
+}
+
+func less(v interface{}) func(i, j int) bool {
+	s := *v.(*[]string)
+	return func(i, j int) bool { return s[i] < s[j] }
+}
+
+func dedupeSlice(slicePtr interface{}, less func(i, j int) bool) {
+	v := reflect.ValueOf(slicePtr).Elem()
+	if v.Len() <= 1 {
+		return
+	}
+	sort.Slice(v.Interface(), less)
+
+	i := 0
+	for j := 1; j < v.Len(); j++ {
+		if !less(i, j) {
+			continue
+		}
+		i++
+		v.Index(i).Set(v.Index(j))
+	}
+	i++
+	v.SetLen(i)
 }
