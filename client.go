@@ -223,14 +223,14 @@ func trimChars(s string) string {
 func (r *DNSData) dedupe() {
 	// dedupe all records
 	dedupeSlice(&r.Resolver, less(&r.Resolver))
-	dedupeSlice(&r.A, less(&r.Resolver))
-	dedupeSlice(&r.AAAA, less(&r.Resolver))
-	dedupeSlice(&r.CNAME, less(&r.Resolver))
-	dedupeSlice(&r.MX, less(&r.Resolver))
-	dedupeSlice(&r.PTR, less(&r.Resolver))
-	dedupeSlice(&r.SOA, less(&r.Resolver))
-	dedupeSlice(&r.NS, less(&r.Resolver))
-	dedupeSlice(&r.TXT, less(&r.Resolver))
+	dedupeSlice(&r.A, less(&r.A))
+	dedupeSlice(&r.AAAA, less(&r.AAAA))
+	dedupeSlice(&r.CNAME, less(&r.CNAME))
+	dedupeSlice(&r.MX, less(&r.MX))
+	dedupeSlice(&r.PTR, less(&r.PTR))
+	dedupeSlice(&r.SOA, less(&r.SOA))
+	dedupeSlice(&r.NS, less(&r.NS))
+	dedupeSlice(&r.TXT, less(&r.TXT))
 }
 
 func (r *DNSData) Marshal() ([]byte, error) {
