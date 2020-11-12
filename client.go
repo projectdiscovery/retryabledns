@@ -108,7 +108,7 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 				continue
 			}
 
-			dnsdata.Domain = host
+			dnsdata.Host = host
 			dnsdata.Raw += resp.String()
 			dnsdata.StatusCode = dns.RcodeToString[resp.Rcode]
 			dnsdata.Resolver = append(dnsdata.Resolver, resolver)
@@ -170,7 +170,7 @@ func parse(answer *dns.Msg, requestType uint16) (results []string) {
 }
 
 type DNSData struct {
-	Domain     string   `json:"domain,omitempty"`
+	Host       string   `json:"host,omitempty"`
 	TTL        int      `json:"ttl,omitempty"`
 	Resolver   []string `json:"resolver,omitempty"`
 	A          []string `json:"a,omitempty"`
