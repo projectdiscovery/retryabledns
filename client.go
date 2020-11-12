@@ -5,6 +5,7 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"math/rand"
+	"net"
 	"reflect"
 	"sort"
 	"strings"
@@ -83,9 +84,11 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 		// In case of PTR adjust the domain name
 		if requestType == dns.TypePTR {
 			var err error
-			name, err = dns.ReverseAddr(host)
-			if err != nil {
-				return nil, err
+			if net.ParseIP(host) != nil {
+				name, err = dns.ReverseAddr(host)
+				if err != nil {
+					return nil, err
+				}
 			}
 			msg.SetEdns0(4096, false)
 		}
