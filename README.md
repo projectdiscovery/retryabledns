@@ -31,12 +31,9 @@ func main() {
     resolvers := []string{"8.8.8.8", "8.8.4.4"}
     retries := 2
     hostname := "hackerone.com"
-    dnsClient, err := dns.New(resolvers, retries)
-    if err != nil {
-        return nil, err
-    }
+    dnsClient := dns.New(resolvers, retries)
 
-    ips, err := d.dnsClient.Resolve(hostname)
+    ips, err := dnsClient.Resolve(hostname)
     if err != nil {
         log.Fatal(err)
     }
@@ -45,7 +42,7 @@ func main() {
 
     // Query Types: dns.TypeA, dns.TypeNS, dns.TypeCNAME, dns.TypeSOA, dns.TypePTR, dns.TypeMX
     // dns.TypeTXT, dns.TypeAAAA (from github.com/miekg/dns)
-    dnsResponses, err := d.dnsClient.ResolveRaw(hostname, dns.TypeA)
+    dnsResponses, err := dnsClient.ResolveRaw(hostname, dns.TypeA)
     if err != nil {
         log.Fatal(err)
     }
