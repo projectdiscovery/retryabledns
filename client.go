@@ -105,6 +105,7 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 			var resp *dns.Msg
 			resp, err = dns.Exchange(&msg, resolver)
 			if err != nil {
+                err = nil
 				continue
 			}
 
