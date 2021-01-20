@@ -1,4 +1,4 @@
-module github.com/projectdiscovery/retryabledns
+module github.com/zt2/retryabledns
 
 go 1.14
 
