@@ -50,6 +50,7 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 		if resp.Rcode != dns.RcodeSuccess {
 			continue
 		}
+
 		// In case we get a non empty answer stop retrying
 		return resp, nil
 	}
@@ -211,8 +212,7 @@ func (d *DNSData) Marshal() ([]byte, error) {
 // Unmarshal decodes the dnsdata from a binary representation
 func (d *DNSData) Unmarshal(b []byte) error {
 	dec := gob.NewDecoder(bytes.NewBuffer(b))
-	err := dec.Decode(&d)
-	return err
+	return dec.Decode(&d)
 }
 
 // deduplicate returns a new slice with duplicates values removed.
