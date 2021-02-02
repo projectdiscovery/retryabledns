@@ -19,8 +19,6 @@ type Client struct {
 	serversIndex uint32
 }
 
-const defaultPort = "53"
-
 // New creates a new dns client
 func New(baseResolvers []string, maxRetries int) *Client {
 	client := Client{
