@@ -28,6 +28,25 @@ func New(baseResolvers []string, maxRetries int) *Client {
 	return &client
 }
 
+// ResolveWithSyscall attempts to resolve the host through system calls
+func (c *Client) ResolveWithSyscall(host string) (*DNSData, error) {
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return nil, err
+	}
+	var d DNSData
+	d.Host = host
+	for _, ip := range ips {
+		if ipv4 := ip.To4(); ipv4 != nil {
+			d.A = append(d.A, ip.String())
+		} else if ipv6 := ip.To16(); ipv6 != nil {
+			d.AAAA = append(d.AAAA, ip.String())
+		}
+	}
+
+	return &d, nil
+}
+
 // Resolve is the underlying resolve function that actually resolves a host
 // and gets the ip records for that host.
 func (c *Client) Resolve(host string) (*DNSData, error) {
