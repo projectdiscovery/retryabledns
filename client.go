@@ -21,6 +21,7 @@ type Client struct {
 
 // New creates a new dns client
 func New(baseResolvers []string, maxRetries int) *Client {
+	baseResolvers = deduplicate(baseResolvers)
 	client := Client{
 		maxRetries: maxRetries,
 		resolvers:  baseResolvers,
@@ -187,10 +188,7 @@ func (d *DNSData) ParseFromMsg(msg *dns.Msg) error {
 }
 
 func (d *DNSData) contains() bool {
-	if len(d.A) > 0 || len(d.AAAA) > 0 || len(d.CNAME) > 0 || len(d.MX) > 0 || len(d.NS) > 0 || len(d.PTR) > 0 || len(d.TXT) > 0 {
-		return true
-	}
-	return false
+	return len(d.A) > 0 || len(d.AAAA) > 0 || len(d.CNAME) > 0 || len(d.MX) > 0 || len(d.NS) > 0 || len(d.PTR) > 0 || len(d.TXT) > 0
 }
 
 // JSON returns the object as json string
