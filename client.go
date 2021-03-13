@@ -72,7 +72,7 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 		// In case we get a non empty answer stop retrying
 		return resp, nil
 	}
-	return nil, errors.New("could not resolve, max retries exceeded")
+	return resp, errors.New("could not resolve, max retries exceeded")
 }
 
 // Query sends a provided dns request and return enriched response
