@@ -56,11 +56,14 @@ func (c *Client) Resolve(host string) (*DNSData, error) {
 
 // Do sends a provided dns request and return the raw native response
 func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
+	var resp *dns.Msg
+	var err error
+	
 	for i := 0; i < c.maxRetries; i++ {
 		index := atomic.AddUint32(&c.serversIndex, 1)
 		resolver := c.resolvers[index%uint32(len(c.resolvers))]
 
-		resp, err := dns.Exchange(msg, resolver)
+		resp, err = dns.Exchange(msg, resolver)
 		if err != nil || resp == nil {
 			continue
 		}
