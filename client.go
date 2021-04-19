@@ -131,7 +131,7 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 				continue
 			}
 
-			dnsdata.ParseFromMsg(resp)
+			err = dnsdata.ParseFromMsg(resp)
 			if !dnsdata.contains() {
 				continue
 			}
@@ -166,32 +166,32 @@ type DNSData struct {
 // ParseFromMsg and enrich data
 func (d *DNSData) ParseFromMsg(msg *dns.Msg) error {
 	for _, record := range msg.Answer {
-		switch record.(type) {
+		switch recordType := record.(type) {
 		case *dns.A:
-			d.A = append(d.A, trimChars(record.(*dns.A).A.String()))
+			d.A = append(d.A, trimChars(recordType.A.String()))
 		case *dns.NS:
-			d.NS = append(d.NS, trimChars(record.(*dns.NS).Ns))
+			d.NS = append(d.NS, trimChars(recordType.Ns))
 		case *dns.CNAME:
-			d.CNAME = append(d.CNAME, trimChars(record.(*dns.CNAME).Target))
+			d.CNAME = append(d.CNAME, trimChars(recordType.Target))
 		case *dns.SOA:
-			d.SOA = append(d.SOA, trimChars(record.(*dns.SOA).Mbox))
+			d.SOA = append(d.SOA, trimChars(recordType.Mbox))
 		case *dns.PTR:
-			d.PTR = append(d.PTR, trimChars(record.(*dns.PTR).Ptr))
+			d.PTR = append(d.PTR, trimChars(recordType.Ptr))
 		case *dns.MX:
-			d.MX = append(d.MX, trimChars(record.(*dns.MX).Mx))
+			d.MX = append(d.MX, trimChars(recordType.Mx))
 		case *dns.TXT:
-			for _, txt := range record.(*dns.TXT).Txt {
+			for _, txt := range recordType.Txt {
 				d.TXT = append(d.TXT, trimChars(txt))
 			}
 		case *dns.AAAA:
-			d.AAAA = append(d.AAAA, trimChars(record.(*dns.AAAA).AAAA.String()))
+			d.AAAA = append(d.AAAA, trimChars(recordType.AAAA.String()))
 		}
 	}
 	return nil
 }
 
 func (d *DNSData) contains() bool {
-	return len(d.A) > 0 || len(d.AAAA) > 0 || len(d.CNAME) > 0 || len(d.MX) > 0 || len(d.NS) > 0 || len(d.PTR) > 0 || len(d.TXT) > 0
+	return len(d.A) > 0 || len(d.AAAA) > 0 || len(d.CNAME) > 0 || len(d.MX) > 0 || len(d.NS) > 0 || len(d.PTR) > 0 || len(d.TXT) > 0 || len(d.SOA) > 0
 }
 
 // JSON returns the object as json string
