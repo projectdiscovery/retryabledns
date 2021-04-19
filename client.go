@@ -58,7 +58,6 @@ func (c *Client) Resolve(host string) (*DNSData, error) {
 func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 	var resp *dns.Msg
 	var err error
-	
 	for i := 0; i < c.maxRetries; i++ {
 		index := atomic.AddUint32(&c.serversIndex, 1)
 		resolver := c.resolvers[index%uint32(len(c.resolvers))]
@@ -174,6 +173,7 @@ func (d *DNSData) ParseFromMsg(msg *dns.Msg) error {
 		case *dns.CNAME:
 			d.CNAME = append(d.CNAME, trimChars(recordType.Target))
 		case *dns.SOA:
+			d.SOA = append(d.SOA, trimChars(recordType.Ns))
 			d.SOA = append(d.SOA, trimChars(recordType.Mbox))
 		case *dns.PTR:
 			d.PTR = append(d.PTR, trimChars(recordType.Ptr))
