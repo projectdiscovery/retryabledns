@@ -52,3 +52,7 @@ func main() {
     log.Println(dnsResponses)
 }
 ```
+
+Credits:
+- https://github.com/lixiangzhong/dnsutil
+- https://github.com/rs/dnstrace
