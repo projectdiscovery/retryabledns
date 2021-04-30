@@ -3,6 +3,7 @@ package retryabledns
 import (
 	"testing"
 
+	"github.com/miekg/dns"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,4 +21,11 @@ func TestConsistentResolve(t *testing.T) {
 			last = d.A[0]
 		}
 	}
+}
+
+func TestTrace(t *testing.T) {
+	client := New([]string{"8.8.8.8:53", "1.1.1.1:53"}, 5)
+
+	_, err := client.Trace("www.projectdiscovery.io", dns.TypeA, 100)
+	require.Nil(t, err, "could not resolve dns")
 }

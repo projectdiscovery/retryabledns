@@ -5,18 +5,27 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"errors"
+	"math/rand"
 	"net"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/miekg/dns"
 )
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
 
 // Client is a DNS resolver client to resolve hostnames.
 type Client struct {
 	resolvers    []string
 	maxRetries   int
 	serversIndex uint32
+	TCPFallback  bool
+	Timeout      time.Duration
 }
 
 // New creates a new dns client
@@ -125,6 +134,13 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 			if err != nil || resp == nil {
 				continue
 			}
+
+			// https://github.com/projectdiscovery/retryabledns/issues/25
+			if resp.Truncated && c.TCPFallback {
+				tcpClient := dns.Client{Net: "tcp", Timeout: c.Timeout}
+				resp, _, err = tcpClient.Exchange(&msg, resolver)
+			}
+
 			// In case we got some error from the server, return.
 			if resp.Rcode != dns.RcodeSuccess {
 				continue
@@ -145,26 +161,126 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 	return nil, err
 }
 
+// QueryParallel sends a provided dns request to multiple resolvers in parallel
+func (c *Client) QueryParallel(host string, requestType uint16, resolvers []string) ([]*DNSData, error) {
+	msg := dns.Msg{}
+	msg.SetQuestion(dns.CanonicalName(host), requestType)
+
+	var dnsdatas []*DNSData
+
+	var wg sync.WaitGroup
+	for _, resolver := range resolvers {
+		var dnsdata DNSData
+		dnsdatas = append(dnsdatas, &dnsdata)
+		wg.Add(1)
+		go func(resolver string, dnsdata *DNSData) {
+			defer wg.Done()
+			resp, err := dns.Exchange(msg.Copy(), resolver)
+			if err != nil {
+				return
+			}
+			err = dnsdata.ParseFromMsg(resp)
+			if err != nil {
+				return
+			}
+			dnsdata.Resolver = append(dnsdata.Resolver, resolver)
+			dnsdata.RawResp = resp
+			dnsdata.dedupe()
+		}(resolver, &dnsdata)
+	}
+
+	wg.Wait()
+
+	return dnsdatas, nil
+}
+
+// QueryMultiple sends a provided dns request and return the data
+func (c *Client) Trace(host string, requestType uint16, maxrecursion int) ([]*DNSData, error) {
+	var allDNSData []*DNSData
+	host = dns.CanonicalName(host)
+	msg := dns.Msg{}
+	msg.SetQuestion(host, requestType)
+	servers := RootDNSServersIPv4
+	for i := 1; i < maxrecursion; i++ {
+		msg.SetQuestion(host, requestType)
+		dnsdatas, err := c.QueryParallel(host, requestType, servers)
+		if err != nil {
+			return nil, err
+		}
+
+		for j := range dnsdatas {
+			dnsdatas[j].RecursionLevel = i
+		}
+
+		if len(dnsdatas) == 0 {
+			return allDNSData, nil
+		}
+
+		allDNSData = append(allDNSData, dnsdatas...)
+
+		var newNSResolvers []string
+		var nextCname string
+		for _, d := range dnsdatas {
+			for _, a := range d.A {
+				newNSResolvers = append(newNSResolvers, net.JoinHostPort(a, "53"))
+			}
+			for _, ns := range d.NS {
+				ips, err := net.LookupIP(ns)
+				if err != nil {
+					continue
+				}
+				for _, ip := range ips {
+					if ip.To4() != nil {
+						newNSResolvers = append(newNSResolvers, net.JoinHostPort(ip.String(), "53"))
+					}
+				}
+			}
+			for _, cname := range d.CNAME {
+				if nextCname == "" {
+					nextCname = cname
+				}
+			}
+		}
+		newNSResolvers = deduplicate(newNSResolvers)
+
+		if len(newNSResolvers) == 0 {
+			return allDNSData, nil
+		}
+		servers = newNSResolvers
+
+		// follow cname if any
+		if nextCname != "" {
+			host = nextCname
+		}
+	}
+
+	return allDNSData, nil
+}
+
 // DNSData is the data for a DNS request response
 type DNSData struct {
-	Host       string   `json:"host,omitempty"`
-	TTL        int      `json:"ttl,omitempty"`
-	Resolver   []string `json:"resolver,omitempty"`
-	A          []string `json:"a,omitempty"`
-	AAAA       []string `json:"aaaa,omitempty"`
-	CNAME      []string `json:"cname,omitempty"`
-	MX         []string `json:"mx,omitempty"`
-	PTR        []string `json:"ptr,omitempty"`
-	SOA        []string `json:"soa,omitempty"`
-	NS         []string `json:"ns,omitempty"`
-	TXT        []string `json:"txt,omitempty"`
-	Raw        string   `json:"raw,omitempty"`
-	StatusCode string   `json:"status_code,omitempty"`
+	Host           string   `json:"host,omitempty"`
+	TTL            int      `json:"ttl,omitempty"`
+	Resolver       []string `json:"resolver,omitempty"`
+	A              []string `json:"a,omitempty"`
+	AAAA           []string `json:"aaaa,omitempty"`
+	CNAME          []string `json:"cname,omitempty"`
+	MX             []string `json:"mx,omitempty"`
+	PTR            []string `json:"ptr,omitempty"`
+	SOA            []string `json:"soa,omitempty"`
+	NS             []string `json:"ns,omitempty"`
+	TXT            []string `json:"txt,omitempty"`
+	Raw            string   `json:"raw,omitempty"`
+	StatusCode     string   `json:"status_code,omitempty"`
+	RawResp        *dns.Msg
+	RecursionLevel int
 }
 
 // ParseFromMsg and enrich data
 func (d *DNSData) ParseFromMsg(msg *dns.Msg) error {
-	for _, record := range msg.Answer {
+	allRecords := append(msg.Answer, msg.Extra...)
+	allRecords = append(allRecords, msg.Ns...)
+	for _, record := range allRecords {
 		switch recordType := record.(type) {
 		case *dns.A:
 			d.A = append(d.A, trimChars(recordType.A.String()))
