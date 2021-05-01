@@ -91,6 +91,46 @@ func (c *Client) Query(host string, requestType uint16) (*DNSData, error) {
 	return c.QueryMultiple(host, []uint16{requestType})
 }
 
+// A helper function
+func (c *Client) A(host string) (*DNSData, error) {
+	return c.QueryMultiple(host, []uint16{dns.TypeA})
+}
+
+// AAAA helper function
+func (c *Client) AAAA(host string) (*DNSData, error) {
+	return c.QueryMultiple(host, []uint16{dns.TypeAAAA})
+}
+
+// MX helper function
+func (c *Client) MX(host string) (*DNSData, error) {
+	return c.QueryMultiple(host, []uint16{dns.TypeMX})
+}
+
+// CNAME helper function
+func (c *Client) CNAME(host string) (*DNSData, error) {
+	return c.QueryMultiple(host, []uint16{dns.TypeCNAME})
+}
+
+// SOA helper function
+func (c *Client) SOA(host string) (*DNSData, error) {
+	return c.QueryMultiple(host, []uint16{dns.TypeSOA})
+}
+
+// TXT helper function
+func (c *Client) TXT(host string) (*DNSData, error) {
+	return c.QueryMultiple(host, []uint16{dns.TypeTXT})
+}
+
+// PTR helper function
+func (c *Client) PTR(host string) (*DNSData, error) {
+	return c.QueryMultiple(host, []uint16{dns.TypePTR})
+}
+
+// NS helper function
+func (c *Client) NS(host string) (*DNSData, error) {
+	return c.QueryMultiple(host, []uint16{dns.TypeNS})
+}
+
 // QueryMultiple sends a provided dns request and return the data
 func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, error) {
 	var (
