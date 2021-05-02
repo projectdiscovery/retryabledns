@@ -5,6 +5,7 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"errors"
+	"log"
 	"math/rand"
 	"net"
 	"strings"
@@ -235,8 +236,8 @@ func (c *Client) QueryParallel(host string, requestType uint16, resolvers []stri
 }
 
 // QueryMultiple sends a provided dns request and return the data
-func (c *Client) Trace(host string, requestType uint16, maxrecursion int) ([]*DNSData, error) {
-	var allDNSData []*DNSData
+func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*TraceData, error) {
+	var tracedata TraceData
 	host = dns.CanonicalName(host)
 	msg := dns.Msg{}
 	msg.SetQuestion(host, requestType)
@@ -248,22 +249,20 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) ([]*DN
 			return nil, err
 		}
 
-		for j := range dnsdatas {
-			dnsdatas[j].RecursionLevel = i
-		}
-
 		if len(dnsdatas) == 0 {
-			return allDNSData, nil
+			return &tracedata, nil
 		}
 
-		allDNSData = append(allDNSData, dnsdatas...)
+		tracedata.DNSData = append(tracedata.DNSData, dnsdatas...)
 
 		var newNSResolvers []string
 		var nextCname string
 		for _, d := range dnsdatas {
+			// Add records provided in the authority section
 			for _, a := range d.A {
 				newNSResolvers = append(newNSResolvers, net.JoinHostPort(a, "53"))
 			}
+			// Add ns records as new resolvers
 			for _, ns := range d.NS {
 				ips, err := net.LookupIP(ns)
 				if err != nil {
@@ -275,18 +274,22 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) ([]*DN
 					}
 				}
 			}
+			// Follow CNAME - should happen at the final step of the trace
 			for _, cname := range d.CNAME {
 				if nextCname == "" {
 					nextCname = cname
+					break
 				}
 			}
 		}
 		newNSResolvers = deduplicate(newNSResolvers)
 
 		if len(newNSResolvers) == 0 {
-			return allDNSData, nil
+			return &tracedata, nil
 		}
-		servers = newNSResolvers
+
+		// Pick a random server
+		servers = []string{newNSResolvers[rand.Intn(len(newNSResolvers))]}
 
 		// follow cname if any
 		if nextCname != "" {
@@ -294,26 +297,28 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) ([]*DN
 		}
 	}
 
-	return allDNSData, nil
+	log.Fatal(tracedata)
+
+	return &tracedata, nil
 }
 
 // DNSData is the data for a DNS request response
 type DNSData struct {
-	Host           string   `json:"host,omitempty"`
-	TTL            int      `json:"ttl,omitempty"`
-	Resolver       []string `json:"resolver,omitempty"`
-	A              []string `json:"a,omitempty"`
-	AAAA           []string `json:"aaaa,omitempty"`
-	CNAME          []string `json:"cname,omitempty"`
-	MX             []string `json:"mx,omitempty"`
-	PTR            []string `json:"ptr,omitempty"`
-	SOA            []string `json:"soa,omitempty"`
-	NS             []string `json:"ns,omitempty"`
-	TXT            []string `json:"txt,omitempty"`
-	Raw            string   `json:"raw,omitempty"`
-	StatusCode     string   `json:"status_code,omitempty"`
-	RawResp        *dns.Msg
-	RecursionLevel int
+	Host       string     `json:"host,omitempty"`
+	TTL        int        `json:"ttl,omitempty"`
+	Resolver   []string   `json:"resolver,omitempty"`
+	A          []string   `json:"a,omitempty"`
+	AAAA       []string   `json:"aaaa,omitempty"`
+	CNAME      []string   `json:"cname,omitempty"`
+	MX         []string   `json:"mx,omitempty"`
+	PTR        []string   `json:"ptr,omitempty"`
+	SOA        []string   `json:"soa,omitempty"`
+	NS         []string   `json:"ns,omitempty"`
+	TXT        []string   `json:"txt,omitempty"`
+	Raw        string     `json:"raw,omitempty"`
+	StatusCode string     `json:"status_code,omitempty"`
+	TraceData  *TraceData `json:"trace,omitempty"`
+	RawResp    *dns.Msg   `json:"raw_resp,omitempty"`
 }
 
 // ParseFromMsg and enrich data
@@ -403,4 +408,10 @@ func deduplicate(s []string) []string {
 		}
 	}
 	return results
+}
+
+// TraceData contains the trace information for a dns query
+type TraceData struct {
+	Host    string     `json:"host,omitempty"`
+	DNSData []*DNSData `json:"chain,omitempty"`
 }
