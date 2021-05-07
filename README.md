@@ -23,15 +23,17 @@ package main
 
 import (
     "log"
-    dns "github.com/projectdiscovery/retryabledns"
+
+    "github.com/projectdiscovery/retryabledns"
+    "github.com/miekg/dns"
 )
 
 func main() {
     // it requires a list of resolvers
-    resolvers := []string{"8.8.8.8", "8.8.4.4"}
+    resolvers := []string{"8.8.8.8:53", "8.8.4.4:53"}
     retries := 2
     hostname := "hackerone.com"
-    dnsClient := dns.New(resolvers, retries)
+    dnsClient := retryabledns.New(resolvers, retries)
 
     ips, err := dnsClient.Resolve(hostname)
     if err != nil {
@@ -42,7 +44,7 @@ func main() {
 
     // Query Types: dns.TypeA, dns.TypeNS, dns.TypeCNAME, dns.TypeSOA, dns.TypePTR, dns.TypeMX
     // dns.TypeTXT, dns.TypeAAAA (from github.com/miekg/dns)
-    dnsResponses, err := dnsClient.ResolveRaw(hostname, dns.TypeA)
+    dnsResponses, err := dnsClient.Query(hostname, dns.TypeA)
     if err != nil {
         log.Fatal(err)
     }
@@ -50,3 +52,7 @@ func main() {
     log.Println(dnsResponses)
 }
 ```
+
+Credits:
+- https://github.com/lixiangzhong/dnsutil
+- https://github.com/rs/dnstrace
