@@ -196,8 +196,8 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 			dnsdata.StatusCode = dns.RcodeToString[resp.Rcode]
 			dnsdata.Resolver = append(dnsdata.Resolver, resolver)
 			dnsdata.dedupe()
-			return &dnsdata, err
 		}
+		return &dnsdata, err
 	}
 	return nil, err
 }
