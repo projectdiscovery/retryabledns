@@ -197,9 +197,8 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 			dnsdata.Resolver = append(dnsdata.Resolver, resolver)
 			dnsdata.dedupe()
 		}
-		return &dnsdata, err
 	}
-	return nil, err
+	return &dnsdata, err
 }
 
 // QueryParallel sends a provided dns request to multiple resolvers in parallel
