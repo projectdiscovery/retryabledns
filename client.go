@@ -5,7 +5,6 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"errors"
-	"log"
 	"math/rand"
 	"net"
 	"strings"
@@ -295,8 +294,6 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*Trac
 			host = nextCname
 		}
 	}
-
-	log.Fatal(tracedata)
 
 	return &tracedata, nil
 }
