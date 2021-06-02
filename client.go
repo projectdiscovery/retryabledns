@@ -251,15 +251,15 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*Trac
 			return &tracedata, nil
 		}
 
-		tracedata.DNSData = append(tracedata.DNSData, dnsdatas...)
+		for _, dnsdata := range dnsdatas {
+			if dnsdata != nil {
+				tracedata.DNSData = append(tracedata.DNSData, dnsdata)
+			}
+		}
 
 		var newNSResolvers []string
 		var nextCname string
 		for _, d := range dnsdatas {
-			// Add records provided in the authority section
-			for _, a := range d.A {
-				newNSResolvers = append(newNSResolvers, net.JoinHostPort(a, "53"))
-			}
 			// Add ns records as new resolvers
 			for _, ns := range d.NS {
 				ips, err := net.LookupIP(ns)
