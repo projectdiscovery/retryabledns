@@ -240,11 +240,16 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*Trac
 	msg := dns.Msg{}
 	msg.SetQuestion(host, requestType)
 	servers := RootDNSServersIPv4
+	seenNS := make(map[string]struct{})
 	for i := 1; i < maxrecursion; i++ {
 		msg.SetQuestion(host, requestType)
 		dnsdatas, err := c.QueryParallel(host, requestType, servers)
 		if err != nil {
 			return nil, err
+		}
+
+		for _, server := range servers {
+			seenNS[server] = struct{}{}
 		}
 
 		if len(dnsdatas) == 0 {
@@ -282,12 +287,19 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*Trac
 		}
 		newNSResolvers = deduplicate(newNSResolvers)
 
+		// if we have no new resolvers => return
 		if len(newNSResolvers) == 0 {
-			return &tracedata, nil
+			break
 		}
 
 		// Pick a random server
-		servers = []string{newNSResolvers[rand.Intn(len(newNSResolvers))]}
+		randomServer := newNSResolvers[rand.Intn(len(newNSResolvers))]
+		// If we pick the same resolver and we are not following any new cname => return
+		if _, ok := seenNS[randomServer]; ok && nextCname == "" {
+			break
+		}
+
+		servers = []string{randomServer}
 
 		// follow cname if any
 		if nextCname != "" {
