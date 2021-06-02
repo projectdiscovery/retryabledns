@@ -252,7 +252,7 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*Trac
 		}
 
 		for _, dnsdata := range dnsdatas {
-			if dnsdata != nil {
+			if dnsdata != nil && len(dnsdata.Resolver) > 0 {
 				tracedata.DNSData = append(tracedata.DNSData, dnsdata)
 			}
 		}
