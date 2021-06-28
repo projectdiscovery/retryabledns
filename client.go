@@ -5,7 +5,6 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"errors"
-	"log"
 	"math/rand"
 	"net"
 	"strings"
@@ -195,6 +194,7 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 			dnsdata.Raw += resp.String()
 			dnsdata.StatusCode = dns.RcodeToString[resp.Rcode]
 			dnsdata.Resolver = append(dnsdata.Resolver, resolver)
+			dnsdata.Timestamp = time.Now()
 			dnsdata.dedupe()
 			return &dnsdata, err
 		}
@@ -226,6 +226,7 @@ func (c *Client) QueryParallel(host string, requestType uint16, resolvers []stri
 			}
 			dnsdata.Resolver = append(dnsdata.Resolver, resolver)
 			dnsdata.RawResp = resp
+			dnsdata.Timestamp = time.Now()
 			dnsdata.dedupe()
 		}(resolver, &dnsdata)
 	}
@@ -297,8 +298,6 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*Trac
 		}
 	}
 
-	log.Fatal(tracedata)
-
 	return &tracedata, nil
 }
 
@@ -319,6 +318,7 @@ type DNSData struct {
 	StatusCode string     `json:"status_code,omitempty"`
 	TraceData  *TraceData `json:"trace,omitempty"`
 	RawResp    *dns.Msg   `json:"raw_resp,omitempty"`
+	Timestamp  time.Time  `json:"timestamp,omitempty"`
 }
 
 // ParseFromMsg and enrich data
