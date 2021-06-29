@@ -178,12 +178,7 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 			// https://github.com/projectdiscovery/retryabledns/issues/25
 			if resp.Truncated && c.TCPFallback {
 				tcpClient := dns.Client{Net: "tcp", Timeout: c.Timeout}
-				resp, _, err = tcpClient.Exchange(&msg, resolver)
-			}
-
-			// In case we got some error from the server, return.
-			if resp.Rcode != dns.RcodeSuccess {
-				continue
+				resp, _, _ = tcpClient.Exchange(&msg, resolver)
 			}
 
 			err = dnsdata.ParseFromMsg(resp)
@@ -193,13 +188,18 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 			dnsdata.Host = host
 			dnsdata.Raw += resp.String()
 			dnsdata.StatusCode = dns.RcodeToString[resp.Rcode]
+			dnsdata.StatusCodeRaw = resp.Rcode
 			dnsdata.Resolver = append(dnsdata.Resolver, resolver)
 			dnsdata.Timestamp = time.Now()
 			dnsdata.dedupe()
-			return &dnsdata, err
+
+			// stop on success
+			if resp.Rcode == dns.RcodeSuccess {
+				break
+			}
 		}
 	}
-	return nil, err
+	return &dnsdata, err
 }
 
 // QueryParallel sends a provided dns request to multiple resolvers in parallel
@@ -303,22 +303,23 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*Trac
 
 // DNSData is the data for a DNS request response
 type DNSData struct {
-	Host       string     `json:"host,omitempty"`
-	TTL        int        `json:"ttl,omitempty"`
-	Resolver   []string   `json:"resolver,omitempty"`
-	A          []string   `json:"a,omitempty"`
-	AAAA       []string   `json:"aaaa,omitempty"`
-	CNAME      []string   `json:"cname,omitempty"`
-	MX         []string   `json:"mx,omitempty"`
-	PTR        []string   `json:"ptr,omitempty"`
-	SOA        []string   `json:"soa,omitempty"`
-	NS         []string   `json:"ns,omitempty"`
-	TXT        []string   `json:"txt,omitempty"`
-	Raw        string     `json:"raw,omitempty"`
-	StatusCode string     `json:"status_code,omitempty"`
-	TraceData  *TraceData `json:"trace,omitempty"`
-	RawResp    *dns.Msg   `json:"raw_resp,omitempty"`
-	Timestamp  time.Time  `json:"timestamp,omitempty"`
+	Host          string     `json:"host,omitempty"`
+	TTL           int        `json:"ttl,omitempty"`
+	Resolver      []string   `json:"resolver,omitempty"`
+	A             []string   `json:"a,omitempty"`
+	AAAA          []string   `json:"aaaa,omitempty"`
+	CNAME         []string   `json:"cname,omitempty"`
+	MX            []string   `json:"mx,omitempty"`
+	PTR           []string   `json:"ptr,omitempty"`
+	SOA           []string   `json:"soa,omitempty"`
+	NS            []string   `json:"ns,omitempty"`
+	TXT           []string   `json:"txt,omitempty"`
+	Raw           string     `json:"raw,omitempty"`
+	StatusCode    string     `json:"status_code,omitempty"`
+	StatusCodeRaw int        `json:"status_code_raw,omitempty"`
+	TraceData     *TraceData `json:"trace,omitempty"`
+	RawResp       *dns.Msg   `json:"raw_resp,omitempty"`
+	Timestamp     time.Time  `json:"timestamp,omitempty"`
 }
 
 // ParseFromMsg and enrich data
