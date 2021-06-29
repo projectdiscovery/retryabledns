@@ -196,10 +196,9 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 			dnsdata.Resolver = append(dnsdata.Resolver, resolver)
 			dnsdata.Timestamp = time.Now()
 			dnsdata.dedupe()
-			return &dnsdata, err
 		}
 	}
-	return nil, err
+	return &dnsdata, err
 }
 
 // QueryParallel sends a provided dns request to multiple resolvers in parallel
@@ -243,6 +242,7 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*Trac
 	msg := dns.Msg{}
 	msg.SetQuestion(host, requestType)
 	servers := RootDNSServersIPv4
+	seenNS := make(map[string]struct{})
 	for i := 1; i < maxrecursion; i++ {
 		msg.SetQuestion(host, requestType)
 		dnsdatas, err := c.QueryParallel(host, requestType, servers)
@@ -250,19 +250,23 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*Trac
 			return nil, err
 		}
 
+		for _, server := range servers {
+			seenNS[server] = struct{}{}
+		}
+
 		if len(dnsdatas) == 0 {
 			return &tracedata, nil
 		}
 
-		tracedata.DNSData = append(tracedata.DNSData, dnsdatas...)
+		for _, dnsdata := range dnsdatas {
+			if dnsdata != nil && len(dnsdata.Resolver) > 0 {
+				tracedata.DNSData = append(tracedata.DNSData, dnsdata)
+			}
+		}
 
 		var newNSResolvers []string
 		var nextCname string
 		for _, d := range dnsdatas {
-			// Add records provided in the authority section
-			for _, a := range d.A {
-				newNSResolvers = append(newNSResolvers, net.JoinHostPort(a, "53"))
-			}
 			// Add ns records as new resolvers
 			for _, ns := range d.NS {
 				ips, err := net.LookupIP(ns)
@@ -285,12 +289,19 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*Trac
 		}
 		newNSResolvers = deduplicate(newNSResolvers)
 
+		// if we have no new resolvers => return
 		if len(newNSResolvers) == 0 {
-			return &tracedata, nil
+			break
 		}
 
 		// Pick a random server
-		servers = []string{newNSResolvers[rand.Intn(len(newNSResolvers))]}
+		randomServer := newNSResolvers[rand.Intn(len(newNSResolvers))]
+		// If we pick the same resolver and we are not following any new cname => return
+		if _, ok := seenNS[randomServer]; ok && nextCname == "" {
+			break
+		}
+
+		servers = []string{randomServer}
 
 		// follow cname if any
 		if nextCname != "" {

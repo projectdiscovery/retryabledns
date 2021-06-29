@@ -23,6 +23,16 @@ func TestConsistentResolve(t *testing.T) {
 	}
 }
 
+func TestQueryMultiple(t *testing.T) {
+	client := New([]string{"8.8.8.8:53", "1.1.1.1:53"}, 5)
+
+	d, _ := client.QueryMultiple("example.com", []uint16{dns.TypeA, dns.TypeAAAA})
+
+	// From current dig result
+	require.True(t, len(d.A) > 0)
+	require.True(t, len(d.AAAA) > 0)
+}
+
 func TestTrace(t *testing.T) {
 	client := New([]string{"8.8.8.8:53", "1.1.1.1:53"}, 5)
 
