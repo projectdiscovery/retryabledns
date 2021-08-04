@@ -182,17 +182,20 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 			}
 
 			err = dnsdata.ParseFromMsg(resp)
-			if !dnsdata.contains() {
-				continue
-			}
+
+			// populate anyway basic info
 			dnsdata.Host = host
-			dnsdata.Raw += resp.String()
 			dnsdata.StatusCode = dns.RcodeToString[resp.Rcode]
 			dnsdata.StatusCodeRaw = resp.Rcode
-			dnsdata.Resolver = append(dnsdata.Resolver, resolver)
 			dnsdata.Timestamp = time.Now()
+			dnsdata.Raw += resp.String()
+			dnsdata.Resolver = append(dnsdata.Resolver, resolver)
+
+			if err != nil || !dnsdata.contains() {
+				continue
+			}
 			dnsdata.dedupe()
-      
+
 			// stop on success
 			if resp.Rcode == dns.RcodeSuccess {
 				break
