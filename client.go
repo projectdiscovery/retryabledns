@@ -155,7 +155,6 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 					return nil, err
 				}
 			}
-			msg.SetEdns0(4096, false)
 		}
 
 		question := dns.Question{
@@ -164,6 +163,9 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 			Qclass: dns.ClassINET,
 		}
 		msg.Question[0] = question
+
+		// Enable Extension Mechanisms for DNS for all messages
+		msg.SetEdns0(4096, false)
 
 		var resp *dns.Msg
 		for i := 0; i < c.maxRetries; i++ {
