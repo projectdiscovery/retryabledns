@@ -21,7 +21,7 @@ func init() {
 
 // Client is a DNS resolver client to resolve hostnames.
 type Client struct {
-	resolvers    []string
+	resolvers    []Resolver
 	maxRetries   int
 	serversIndex uint32
 	TCPFallback  bool
@@ -30,10 +30,10 @@ type Client struct {
 
 // New creates a new dns client
 func New(baseResolvers []string, maxRetries int) *Client {
-	baseResolvers = deduplicate(baseResolvers)
+	parsedBaseResolvers := parseResolvers(deduplicate(baseResolvers))
 	client := Client{
 		maxRetries: maxRetries,
-		resolvers:  baseResolvers,
+		resolvers:  parsedBaseResolvers,
 	}
 	return &client
 }
@@ -71,7 +71,13 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 		index := atomic.AddUint32(&c.serversIndex, 1)
 		resolver := c.resolvers[index%uint32(len(c.resolvers))]
 
-		resp, err = dns.Exchange(msg, resolver)
+		if resolver.Protocol == TCP {
+			tcpClient := dns.Client{Net: "tcp", Timeout: c.Timeout}
+			resp, _, err = tcpClient.Exchange(msg, resolver.String())
+		} else {
+			resp, err = dns.Exchange(msg, resolver.String())
+		}
+
 		if err != nil || resp == nil {
 			continue
 		}
@@ -172,7 +178,12 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 			index := atomic.AddUint32(&c.serversIndex, 1)
 			resolver := c.resolvers[index%uint32(len(c.resolvers))]
 
-			resp, err = dns.Exchange(&msg, resolver)
+			if resolver.Protocol == TCP {
+				tcpClient := dns.Client{Net: "tcp", Timeout: c.Timeout}
+				resp, _, err = tcpClient.Exchange(&msg, resolver.String())
+			} else {
+				resp, err = dns.Exchange(&msg, resolver.String())
+			}
 			if err != nil || resp == nil {
 				continue
 			}
@@ -180,7 +191,7 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 			// https://github.com/projectdiscovery/retryabledns/issues/25
 			if resp.Truncated && c.TCPFallback {
 				tcpClient := dns.Client{Net: "tcp", Timeout: c.Timeout}
-				resp, _, _ = tcpClient.Exchange(&msg, resolver)
+				resp, _, _ = tcpClient.Exchange(&msg, resolver.String())
 			}
 
 			err = dnsdata.ParseFromMsg(resp)
@@ -191,7 +202,7 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 			dnsdata.StatusCodeRaw = resp.Rcode
 			dnsdata.Timestamp = time.Now()
 			dnsdata.Raw += resp.String()
-			dnsdata.Resolver = append(dnsdata.Resolver, resolver)
+			dnsdata.Resolver = append(dnsdata.Resolver, resolver.String())
 
 			if err != nil || !dnsdata.contains() {
 				continue
