@@ -22,18 +22,19 @@ func init() {
 // Client is a DNS resolver client to resolve hostnames.
 type Client struct {
 	resolvers    []Resolver
-	maxRetries   int
+	options      Options
 	serversIndex uint32
 	TCPFallback  bool
-	Timeout      time.Duration
+	tcpClient    *dns.Client
 }
 
 // New creates a new dns client
-func New(baseResolvers []string, maxRetries int) *Client {
-	parsedBaseResolvers := parseResolvers(deduplicate(baseResolvers))
+func New(options Options) *Client {
+	parsedBaseResolvers := parseResolvers(deduplicate(options.BaseResolvers))
 	client := Client{
-		maxRetries: maxRetries,
-		resolvers:  parsedBaseResolvers,
+		options:   options,
+		resolvers: parsedBaseResolvers,
+		tcpClient: &dns.Client{Net: "tcp", Timeout: options.Timeout},
 	}
 	return &client
 }
@@ -67,12 +68,12 @@ func (c *Client) Resolve(host string) (*DNSData, error) {
 func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 	var resp *dns.Msg
 	var err error
-	for i := 0; i < c.maxRetries; i++ {
+	for i := 0; i < c.options.MaxRetries; i++ {
 		index := atomic.AddUint32(&c.serversIndex, 1)
 		resolver := c.resolvers[index%uint32(len(c.resolvers))]
 
 		if resolver.Protocol == TCP {
-			tcpClient := dns.Client{Net: "tcp", Timeout: c.Timeout}
+			tcpClient := dns.Client{Net: "tcp", Timeout: c.options.Timeout}
 			resp, _, err = tcpClient.Exchange(msg, resolver.String())
 		} else {
 			resp, err = dns.Exchange(msg, resolver.String())
@@ -174,12 +175,12 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 		msg.SetEdns0(4096, false)
 
 		var resp *dns.Msg
-		for i := 0; i < c.maxRetries; i++ {
+		for i := 0; i < c.options.MaxRetries; i++ {
 			index := atomic.AddUint32(&c.serversIndex, 1)
 			resolver := c.resolvers[index%uint32(len(c.resolvers))]
 
 			if resolver.Protocol == TCP {
-				tcpClient := dns.Client{Net: "tcp", Timeout: c.Timeout}
+				tcpClient := dns.Client{Net: "tcp", Timeout: c.options.Timeout}
 				resp, _, err = tcpClient.Exchange(&msg, resolver.String())
 			} else {
 				resp, err = dns.Exchange(&msg, resolver.String())
@@ -190,8 +191,7 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 
 			// https://github.com/projectdiscovery/retryabledns/issues/25
 			if resp.Truncated && c.TCPFallback {
-				tcpClient := dns.Client{Net: "tcp", Timeout: c.Timeout}
-				resp, _, _ = tcpClient.Exchange(&msg, resolver.String())
+				resp, _, _ = c.tcpClient.Exchange(&msg, resolver.String())
 			}
 
 			err = dnsdata.ParseFromMsg(resp)
