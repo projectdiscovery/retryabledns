@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
+	"github.com/projectdiscovery/retryabledns/doh"
 )
 
 func init() {
@@ -26,6 +27,7 @@ type Client struct {
 	serversIndex uint32
 	TCPFallback  bool
 	tcpClient    *dns.Client
+	dohClient    *doh.Client
 }
 
 // New creates a new dns client
@@ -34,7 +36,8 @@ func New(options Options) *Client {
 	client := Client{
 		options:   options,
 		resolvers: parsedBaseResolvers,
-		tcpClient: &dns.Client{Net: "tcp", Timeout: options.Timeout},
+		tcpClient: &dns.Client{Net: TCP.String(), Timeout: options.Timeout},
+		dohClient: doh.New(),
 	}
 	return &client
 }
@@ -72,11 +75,16 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 		index := atomic.AddUint32(&c.serversIndex, 1)
 		resolver := c.resolvers[index%uint32(len(c.resolvers))]
 
-		if resolver.Protocol == TCP {
-			tcpClient := dns.Client{Net: "tcp", Timeout: c.options.Timeout}
-			resp, _, err = tcpClient.Exchange(msg, resolver.String())
-		} else {
-			resp, err = dns.Exchange(msg, resolver.String())
+		switch r := resolver.(type) {
+		case *NetworkResolver:
+			switch r.Protocol {
+			case TCP:
+				resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
+			case UDP:
+				resp, err = dns.Exchange(msg, resolver.String())
+			}
+		case *DohResolver:
+			resp, err = c.dohClient.QueryWithDOHMsg(doh.Method(r.Method()), doh.Resolver{URL: r.URL}, msg)
 		}
 
 		if err != nil || resp == nil {
@@ -145,7 +153,7 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 		err     error
 	)
 
-	msg := dns.Msg{}
+	msg := &dns.Msg{}
 	msg.Id = dns.Id()
 	msg.RecursionDesired = true
 	msg.Question = make([]dns.Question, 1)
@@ -179,11 +187,20 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 			index := atomic.AddUint32(&c.serversIndex, 1)
 			resolver := c.resolvers[index%uint32(len(c.resolvers))]
 
-			if resolver.Protocol == TCP {
-				tcpClient := dns.Client{Net: "tcp", Timeout: c.options.Timeout}
-				resp, _, err = tcpClient.Exchange(&msg, resolver.String())
-			} else {
-				resp, err = dns.Exchange(&msg, resolver.String())
+			switch r := resolver.(type) {
+			case *NetworkResolver:
+				switch r.Protocol {
+				case TCP:
+					resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
+				case UDP:
+					resp, err = dns.Exchange(msg, resolver.String())
+				}
+			case *DohResolver:
+				method := doh.MethodPost
+				if r.Protocol == GET {
+					method = doh.MethodGet
+				}
+				resp, err = c.dohClient.QueryWithDOHMsg(method, doh.Resolver{URL: r.URL}, msg)
 			}
 			if err != nil || resp == nil {
 				continue
@@ -191,7 +208,7 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 
 			// https://github.com/projectdiscovery/retryabledns/issues/25
 			if resp.Truncated && c.TCPFallback {
-				resp, _, _ = c.tcpClient.Exchange(&msg, resolver.String())
+				resp, _, _ = c.tcpClient.Exchange(msg, resolver.String())
 			}
 
 			err = dnsdata.ParseFromMsg(resp)
