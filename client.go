@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
-	"github.com/projectdiscovery/retryabledns/doh"
 )
 
 func init() {
@@ -27,7 +26,6 @@ type Client struct {
 	serversIndex uint32
 	TCPFallback  bool
 	Timeout      time.Duration
-	dohClient    *doh.Client
 }
 
 // New creates a new dns client
