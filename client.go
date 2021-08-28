@@ -31,7 +31,12 @@ type Client struct {
 }
 
 // New creates a new dns client
-func New(options Options) *Client {
+func New(baseResolvers []string, maxRetries int) *Client {
+	return NewWithOptions(Options{BaseResolvers: baseResolvers, MaxRetries: maxRetries})
+}
+
+// New creates a new dns client with options
+func NewWithOptions(options Options) *Client {
 	parsedBaseResolvers := parseResolvers(deduplicate(options.BaseResolvers))
 	client := Client{
 		options:   options,
