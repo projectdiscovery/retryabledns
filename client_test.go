@@ -23,10 +23,21 @@ func TestConsistentResolve(t *testing.T) {
 	}
 }
 
+func TestDOH(t *testing.T) {
+	client := New([]string{"doh:https://doh.opendns.com/dns-query:post", "doh:https://doh.opendns.com/dns-query:get"}, 5)
+
+	d, err := client.QueryMultiple("example.com", []uint16{dns.TypeA})
+	require.Nil(t, err)
+
+	// From current dig result
+	require.True(t, len(d.A) > 0)
+}
+
 func TestQueryMultiple(t *testing.T) {
 	client := New([]string{"8.8.8.8:53", "1.1.1.1:53"}, 5)
 
-	d, _ := client.QueryMultiple("example.com", []uint16{dns.TypeA, dns.TypeAAAA})
+	d, err := client.QueryMultiple("example.com", []uint16{dns.TypeA, dns.TypeAAAA})
+	require.Nil(t, err)
 
 	// From current dig result
 	require.True(t, len(d.A) > 0)

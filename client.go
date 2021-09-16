@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
+	"github.com/projectdiscovery/retryabledns/doh"
 )
 
 func init() {
@@ -21,19 +22,27 @@ func init() {
 
 // Client is a DNS resolver client to resolve hostnames.
 type Client struct {
-	resolvers    []string
-	maxRetries   int
+	resolvers    []Resolver
+	options      Options
 	serversIndex uint32
 	TCPFallback  bool
-	Timeout      time.Duration
+	tcpClient    *dns.Client
+	dohClient    *doh.Client
 }
 
 // New creates a new dns client
 func New(baseResolvers []string, maxRetries int) *Client {
-	baseResolvers = deduplicate(baseResolvers)
+	return NewWithOptions(Options{BaseResolvers: baseResolvers, MaxRetries: maxRetries})
+}
+
+// New creates a new dns client with options
+func NewWithOptions(options Options) *Client {
+	parsedBaseResolvers := parseResolvers(deduplicate(options.BaseResolvers))
 	client := Client{
-		maxRetries: maxRetries,
-		resolvers:  baseResolvers,
+		options:   options,
+		resolvers: parsedBaseResolvers,
+		tcpClient: &dns.Client{Net: TCP.String(), Timeout: options.Timeout},
+		dohClient: doh.New(),
 	}
 	return &client
 }
@@ -67,11 +76,22 @@ func (c *Client) Resolve(host string) (*DNSData, error) {
 func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 	var resp *dns.Msg
 	var err error
-	for i := 0; i < c.maxRetries; i++ {
+	for i := 0; i < c.options.MaxRetries; i++ {
 		index := atomic.AddUint32(&c.serversIndex, 1)
 		resolver := c.resolvers[index%uint32(len(c.resolvers))]
 
-		resp, err = dns.Exchange(msg, resolver)
+		switch r := resolver.(type) {
+		case *NetworkResolver:
+			switch r.Protocol {
+			case TCP:
+				resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
+			case UDP:
+				resp, err = dns.Exchange(msg, resolver.String())
+			}
+		case *DohResolver:
+			resp, err = c.dohClient.QueryWithDOHMsg(doh.Method(r.Method()), doh.Resolver{URL: r.URL}, msg)
+		}
+
 		if err != nil || resp == nil {
 			continue
 		}
@@ -138,7 +158,7 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 		err     error
 	)
 
-	msg := dns.Msg{}
+	msg := &dns.Msg{}
 	msg.Id = dns.Id()
 	msg.RecursionDesired = true
 	msg.Question = make([]dns.Question, 1)
@@ -168,19 +188,32 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 		msg.SetEdns0(4096, false)
 
 		var resp *dns.Msg
-		for i := 0; i < c.maxRetries; i++ {
+		for i := 0; i < c.options.MaxRetries; i++ {
 			index := atomic.AddUint32(&c.serversIndex, 1)
 			resolver := c.resolvers[index%uint32(len(c.resolvers))]
 
-			resp, err = dns.Exchange(&msg, resolver)
+			switch r := resolver.(type) {
+			case *NetworkResolver:
+				switch r.Protocol {
+				case TCP:
+					resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
+				case UDP:
+					resp, err = dns.Exchange(msg, resolver.String())
+				}
+			case *DohResolver:
+				method := doh.MethodPost
+				if r.Protocol == GET {
+					method = doh.MethodGet
+				}
+				resp, err = c.dohClient.QueryWithDOHMsg(method, doh.Resolver{URL: r.URL}, msg)
+			}
 			if err != nil || resp == nil {
 				continue
 			}
 
 			// https://github.com/projectdiscovery/retryabledns/issues/25
 			if resp.Truncated && c.TCPFallback {
-				tcpClient := dns.Client{Net: "tcp", Timeout: c.Timeout}
-				resp, _, _ = tcpClient.Exchange(&msg, resolver)
+				resp, _, _ = c.tcpClient.Exchange(msg, resolver.String())
 			}
 
 			err = dnsdata.ParseFromMsg(resp)
@@ -191,7 +224,7 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 			dnsdata.StatusCodeRaw = resp.Rcode
 			dnsdata.Timestamp = time.Now()
 			dnsdata.Raw += resp.String()
-			dnsdata.Resolver = append(dnsdata.Resolver, resolver)
+			dnsdata.Resolver = append(dnsdata.Resolver, resolver.String())
 
 			if err != nil || !dnsdata.contains() {
 				continue
