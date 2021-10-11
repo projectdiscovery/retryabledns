@@ -2,6 +2,8 @@ package hostsfile
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"runtime"
 	"strings"
 
@@ -11,7 +13,7 @@ import (
 
 func Path() string {
 	if runtime.GOOS == "windows" {
-		return `C:\Windows\System32\Drivers\etc\hosts`
+		return fmt.Sprintf(`%s\System32\Drivers\etc\hosts`, os.Getenv("SystemRoot"))
 	}
 	return "/etc/hosts"
 }
