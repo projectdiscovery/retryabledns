@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
+	"github.com/projectdiscovery/iputil"
 	"github.com/projectdiscovery/retryabledns/doh"
+	"github.com/projectdiscovery/retryabledns/hostsfile"
 )
 
 func init() {
@@ -28,6 +30,7 @@ type Client struct {
 	TCPFallback  bool
 	tcpClient    *dns.Client
 	dohClient    *doh.Client
+	knownHosts   map[string][]string
 }
 
 // New creates a new dns client
@@ -38,11 +41,16 @@ func New(baseResolvers []string, maxRetries int) *Client {
 // New creates a new dns client with options
 func NewWithOptions(options Options) *Client {
 	parsedBaseResolvers := parseResolvers(deduplicate(options.BaseResolvers))
+	var knownHosts map[string][]string
+	if options.Hostsfile {
+		knownHosts, _ = hostsfile.ParseDefault()
+	}
 	client := Client{
-		options:   options,
-		resolvers: parsedBaseResolvers,
-		tcpClient: &dns.Client{Net: TCP.String(), Timeout: options.Timeout},
-		dohClient: doh.New(),
+		options:    options,
+		resolvers:  parsedBaseResolvers,
+		tcpClient:  &dns.Client{Net: TCP.String(), Timeout: options.Timeout},
+		dohClient:  doh.New(),
+		knownHosts: knownHosts,
 	}
 	return &client
 }
@@ -158,6 +166,19 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 		err     error
 	)
 
+	// integrate data with known hosts in case
+	if c.options.Hostsfile {
+		if ips, ok := c.knownHosts[host]; ok {
+			for _, ip := range ips {
+				if iputil.IsIPv4(ip) {
+					dnsdata.A = append(dnsdata.A, ip)
+				} else if iputil.IsIPv6(ip) {
+					dnsdata.AAAA = append(dnsdata.AAAA, ip)
+				}
+			}
+		}
+	}
+
 	msg := &dns.Msg{}
 	msg.Id = dns.Id()
 	msg.RecursionDesired = true
@@ -237,6 +258,7 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 			}
 		}
 	}
+
 	return &dnsdata, err
 }
 
