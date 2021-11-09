@@ -284,9 +284,13 @@ func (c *Client) QueryParallel(host string, requestType uint16, resolvers []stri
 			if err != nil {
 				return
 			}
+			dnsdata.Host = host
+			dnsdata.StatusCode = dns.RcodeToString[resp.Rcode]
+			dnsdata.StatusCodeRaw = resp.Rcode
+			dnsdata.Timestamp = time.Now()
 			dnsdata.Resolver = append(dnsdata.Resolver, resolver)
 			dnsdata.RawResp = resp
-			dnsdata.Timestamp = time.Now()
+			dnsdata.Raw = resp.String()
 			dnsdata.dedupe()
 		}(resolver, &dnsdata)
 	}
