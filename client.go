@@ -18,8 +18,16 @@ import (
 	"github.com/projectdiscovery/retryabledns/hostsfile"
 )
 
+var internalRangeCheckerInstance *internalRangeChecker
+
 func init() {
 	rand.Seed(time.Now().UnixNano())
+
+	var err error
+	internalRangeCheckerInstance, err = newInternalRangeChecker()
+	if err != nil {
+		panic(err)
+	}
 }
 
 // Client is a DNS resolver client to resolve hostnames.
@@ -391,6 +399,7 @@ type DNSData struct {
 	NS            []string   `json:"ns,omitempty"`
 	TXT           []string   `json:"txt,omitempty"`
 	Raw           string     `json:"raw,omitempty"`
+	Internal      bool       `json:"internal,omitempty"`
 	StatusCode    string     `json:"status_code,omitempty"`
 	StatusCodeRaw int        `json:"status_code_raw,omitempty"`
 	TraceData     *TraceData `json:"trace,omitempty"`
@@ -398,13 +407,21 @@ type DNSData struct {
 	Timestamp     time.Time  `json:"timestamp,omitempty"`
 }
 
+// CheckInternalIPs when set to true returns if DNS response IPs
+// belong to internal IP ranges.
+var CheckInternalIPs = false
+
 // ParseFromMsg and enrich data
 func (d *DNSData) ParseFromMsg(msg *dns.Msg) error {
 	allRecords := append(msg.Answer, msg.Extra...)
 	allRecords = append(allRecords, msg.Ns...)
+
 	for _, record := range allRecords {
 		switch recordType := record.(type) {
 		case *dns.A:
+			if CheckInternalIPs && internalRangeCheckerInstance.ContainsIPv4(recordType.A) {
+				d.Internal = true
+			}
 			d.A = append(d.A, trimChars(recordType.A.String()))
 		case *dns.NS:
 			d.NS = append(d.NS, trimChars(recordType.Ns))
@@ -422,9 +439,13 @@ func (d *DNSData) ParseFromMsg(msg *dns.Msg) error {
 				d.TXT = append(d.TXT, trimChars(txt))
 			}
 		case *dns.AAAA:
+			if CheckInternalIPs && internalRangeCheckerInstance.ContainsIPv6(recordType.AAAA) {
+				d.Internal = true
+			}
 			d.AAAA = append(d.AAAA, trimChars(recordType.AAAA.String()))
 		}
 	}
+
 	return nil
 }
 
