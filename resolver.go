@@ -13,6 +13,7 @@ const (
 	UDP Protocol = iota
 	TCP
 	DOH
+	DOT
 )
 
 func (p Protocol) String() string {
@@ -23,6 +24,8 @@ func (p Protocol) String() string {
 		return "udp"
 	case TCP:
 		return "tcp"
+	case DOT:
+		return "dot"
 	}
 
 	return ""
@@ -89,12 +92,14 @@ func (r DohResolver) String() string {
 }
 
 func parseResolver(r string) (resolver Resolver) {
-	isTcp, isUDP, isDoh := hasProtocol(r, TCP.StringWithSemicolon()), hasProtocol(r, UDP.StringWithSemicolon()), hasProtocol(r, DOH.StringWithSemicolon())
+	isTcp, isUDP, isDoh, isDot := hasProtocol(r, TCP.StringWithSemicolon()), hasProtocol(r, UDP.StringWithSemicolon()), hasProtocol(r, DOH.StringWithSemicolon()), hasProtocol(r, DOT.StringWithSemicolon())
 	rNetworkTokens := trimProtocol(r)
-	if isTcp || isUDP {
+	if isTcp || isUDP || isDot {
 		networkResolver := &NetworkResolver{Protocol: UDP}
 		if isTcp {
 			networkResolver.Protocol = TCP
+		} else if isDot {
+			networkResolver.Protocol = DOT
 		}
 		parseHostPort(networkResolver, rNetworkTokens)
 		resolver = networkResolver
@@ -123,7 +128,11 @@ func parseHostPort(networkResolver *NetworkResolver, r string) {
 		networkResolver.Port = port
 	} else {
 		networkResolver.Host = r
-		networkResolver.Port = "53"
+		if networkResolver.Protocol == DOT {
+			networkResolver.Port = "853"
+		} else {
+			networkResolver.Port = "53"
+		}
 	}
 }
 
@@ -136,7 +145,7 @@ func hasDohProtocol(resolver, protocol string) bool {
 }
 
 func trimProtocol(resolver string) string {
-	return stringsutil.TrimPrefixAny(resolver, TCP.StringWithSemicolon(), UDP.StringWithSemicolon(), DOH.StringWithSemicolon())
+	return stringsutil.TrimPrefixAny(resolver, TCP.StringWithSemicolon(), UDP.StringWithSemicolon(), DOH.StringWithSemicolon(), DOT.StringWithSemicolon())
 }
 
 func trimDohProtocol(resolver string) string {

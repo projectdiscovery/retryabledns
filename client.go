@@ -28,8 +28,10 @@ type Client struct {
 	options      Options
 	serversIndex uint32
 	TCPFallback  bool
+	udpClient    *dns.Client
 	tcpClient    *dns.Client
 	dohClient    *doh.Client
+	dotClient    *dns.Client
 	knownHosts   map[string][]string
 }
 
@@ -48,8 +50,10 @@ func NewWithOptions(options Options) *Client {
 	client := Client{
 		options:    options,
 		resolvers:  parsedBaseResolvers,
+		udpClient:  &dns.Client{Net: "", Timeout: options.Timeout},
 		tcpClient:  &dns.Client{Net: TCP.String(), Timeout: options.Timeout},
 		dohClient:  doh.New(),
+		dotClient:  &dns.Client{Net: "tcp-tls", Timeout: options.Timeout},
 		knownHosts: knownHosts,
 	}
 	return &client
@@ -94,10 +98,16 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 			case TCP:
 				resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
 			case UDP:
-				resp, err = dns.Exchange(msg, resolver.String())
+				resp, _, err = c.udpClient.Exchange(msg, resolver.String())
+			case DOT:
+				resp, _, err = c.dotClient.Exchange(msg, resolver.String())
 			}
 		case *DohResolver:
-			resp, err = c.dohClient.QueryWithDOHMsg(doh.Method(r.Method()), doh.Resolver{URL: r.URL}, msg)
+			method := doh.MethodPost
+			if r.Protocol == GET {
+				method = doh.MethodGet
+			}
+			resp, err = c.dohClient.QueryWithDOHMsg(method, doh.Resolver{URL: r.URL}, msg)
 		}
 
 		if err != nil || resp == nil {
@@ -219,7 +229,9 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 				case TCP:
 					resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
 				case UDP:
-					resp, err = dns.Exchange(msg, resolver.String())
+					resp, _, err = c.udpClient.Exchange(msg, resolver.String())
+				case DOT:
+					resp, _, err = c.dotClient.Exchange(msg, resolver.String())
 				}
 			case *DohResolver:
 				method := doh.MethodPost
