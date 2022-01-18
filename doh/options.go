@@ -9,7 +9,7 @@ import (
 
 type Options struct {
 	DefaultResolver Resolver
-	httpClient      *retryablehttp.Client
+	HttpClient      *retryablehttp.Client
 }
 
 type Resolver struct {

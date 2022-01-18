@@ -16,6 +16,7 @@ import (
 	"github.com/projectdiscovery/iputil"
 	"github.com/projectdiscovery/retryabledns/doh"
 	"github.com/projectdiscovery/retryabledns/hostsfile"
+	"github.com/projectdiscovery/retryablehttp-go"
 )
 
 func init() {
@@ -47,12 +48,18 @@ func NewWithOptions(options Options) *Client {
 	if options.Hostsfile {
 		knownHosts, _ = hostsfile.ParseDefault()
 	}
+	httpOptions := retryablehttp.DefaultOptionsSingle
+	httpOptions.Timeout = options.Timeout
 	client := Client{
-		options:    options,
-		resolvers:  parsedBaseResolvers,
-		udpClient:  &dns.Client{Net: "", Timeout: options.Timeout},
-		tcpClient:  &dns.Client{Net: TCP.String(), Timeout: options.Timeout},
-		dohClient:  doh.New(),
+		options:   options,
+		resolvers: parsedBaseResolvers,
+		udpClient: &dns.Client{Net: "", Timeout: options.Timeout},
+		tcpClient: &dns.Client{Net: TCP.String(), Timeout: options.Timeout},
+		dohClient: doh.NewWithOptions(
+			doh.Options{
+				HttpClient: retryablehttp.NewClient(httpOptions),
+			},
+		),
 		dotClient:  &dns.Client{Net: "tcp-tls", Timeout: options.Timeout},
 		knownHosts: knownHosts,
 	}
