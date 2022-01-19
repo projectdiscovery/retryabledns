@@ -7,53 +7,33 @@ import (
 	"github.com/projectdiscovery/stringsutil"
 )
 
-type Protocol int
+type Protocol string
 
 const (
-	UDP Protocol = iota
-	TCP
-	DOH
-	DOT
+	UDP Protocol = "udp"
+	TCP Protocol = "tcp"
+	DOH Protocol = "doh"
+	DOT Protocol = "dot"
 )
 
 func (p Protocol) String() string {
-	switch p {
-	case DOH:
-		return "doh"
-	case UDP:
-		return "udp"
-	case TCP:
-		return "tcp"
-	case DOT:
-		return "dot"
-	}
-
-	return ""
+	return string(p)
 }
 
 func (p Protocol) StringWithSemicolon() string {
 	return p.String() + ":"
 }
 
-type DohProtocol int
+type DohProtocol string
 
 const (
-	JsonAPI DohProtocol = iota
-	GET
-	POST
+	JsonAPI DohProtocol = "jsonapi"
+	GET     DohProtocol = "get"
+	POST    DohProtocol = "post"
 )
 
 func (p DohProtocol) String() string {
-	switch p {
-	case JsonAPI:
-		return "jsonapi"
-	case GET:
-		return "get"
-	case POST:
-		return "post"
-	}
-
-	return ""
+	return string(p)
 }
 
 func (p DohProtocol) StringWithSemicolon() string {
@@ -92,29 +72,34 @@ func (r DohResolver) String() string {
 }
 
 func parseResolver(r string) (resolver Resolver) {
-	isTcp, isUDP, isDoh, isDot := hasProtocol(r, TCP.StringWithSemicolon()), hasProtocol(r, UDP.StringWithSemicolon()), hasProtocol(r, DOH.StringWithSemicolon()), hasProtocol(r, DOT.StringWithSemicolon())
 	rNetworkTokens := trimProtocol(r)
-	if isTcp || isUDP || isDot {
-		networkResolver := &NetworkResolver{Protocol: UDP}
-		if isTcp {
-			networkResolver.Protocol = TCP
-		} else if isDot {
-			networkResolver.Protocol = DOT
+	protocol := UDP
+
+	if len(r) >= 4 && r[3] == 58 { // 58 is ":"
+		switch r[0:3] {
+		case "udp":
+		case "tcp":
+			protocol = TCP
+		case "dot":
+			protocol = DOT
+		case "doh":
+			protocol = DOH
+			isJsonApi, isGet := hasDohProtocol(r, JsonAPI.StringWithSemicolon()), hasDohProtocol(r, GET.StringWithSemicolon())
+			URL := trimDohProtocol(rNetworkTokens)
+			dohResolver := &DohResolver{URL: URL, Protocol: POST}
+			if isJsonApi {
+				dohResolver.Protocol = JsonAPI
+			} else if isGet {
+				dohResolver.Protocol = GET
+			}
+			resolver = dohResolver
+		default:
+			// unsupported protocol?
 		}
-		parseHostPort(networkResolver, rNetworkTokens)
-		resolver = networkResolver
-	} else if isDoh {
-		isJsonApi, isGet := hasDohProtocol(r, JsonAPI.StringWithSemicolon()), hasDohProtocol(r, GET.StringWithSemicolon())
-		URL := trimDohProtocol(rNetworkTokens)
-		dohResolver := &DohResolver{URL: URL, Protocol: POST}
-		if isJsonApi {
-			dohResolver.Protocol = JsonAPI
-		} else if isGet {
-			dohResolver.Protocol = GET
-		}
-		resolver = dohResolver
-	} else {
-		networkResolver := &NetworkResolver{Protocol: UDP}
+	}
+
+	if protocol != DOH {
+		networkResolver := &NetworkResolver{Protocol: protocol}
 		parseHostPort(networkResolver, rNetworkTokens)
 		resolver = networkResolver
 	}
@@ -134,10 +119,6 @@ func parseHostPort(networkResolver *NetworkResolver, r string) {
 			networkResolver.Port = "53"
 		}
 	}
-}
-
-func hasProtocol(resolver, protocol string) bool {
-	return strings.HasPrefix(resolver, protocol)
 }
 
 func hasDohProtocol(resolver, protocol string) bool {

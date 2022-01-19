@@ -23,6 +23,26 @@ func TestConsistentResolve(t *testing.T) {
 	}
 }
 
+func TestUDP(t *testing.T) {
+	client := New([]string{"1.1.1.1:53", "udp:8.8.8.8"}, 5)
+
+	d, err := client.QueryMultiple("example.com", []uint16{dns.TypeA})
+	require.Nil(t, err)
+
+	// From current dig result
+	require.True(t, len(d.A) > 0)
+}
+
+func TestTCP(t *testing.T) {
+	client := New([]string{"tcp:1.1.1.1:53", "tcp:8.8.8.8"}, 5)
+
+	d, err := client.QueryMultiple("example.com", []uint16{dns.TypeA})
+	require.Nil(t, err)
+
+	// From current dig result
+	require.True(t, len(d.A) > 0)
+}
+
 func TestDOH(t *testing.T) {
 	client := New([]string{"doh:https://doh.opendns.com/dns-query:post", "doh:https://doh.opendns.com/dns-query:get"}, 5)
 
