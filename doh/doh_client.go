@@ -18,11 +18,11 @@ type Client struct {
 }
 
 func NewWithOptions(options Options) *Client {
-	return &Client{DefaultResolver: options.DefaultResolver, httpClient: options.httpClient}
+	return &Client{DefaultResolver: options.DefaultResolver, httpClient: options.HttpClient}
 }
 
 func New() *Client {
-	return NewWithOptions(Options{DefaultResolver: Cloudflare, httpClient: retryablehttp.NewClient(retryablehttp.DefaultOptionsSingle)})
+	return NewWithOptions(Options{DefaultResolver: Cloudflare, HttpClient: retryablehttp.NewClient(retryablehttp.DefaultOptionsSingle)})
 }
 
 func (c *Client) Query(name string, question QuestionType) (*Response, error) {
