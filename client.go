@@ -5,6 +5,7 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/rand"
 	"net"
 	"strings"
@@ -26,7 +27,7 @@ func init() {
 	var err error
 	internalRangeCheckerInstance, err = newInternalRangeChecker()
 	if err != nil {
-		panic(err)
+		fmt.Printf("could not initialize range checker: %s\n", err)
 	}
 }
 
@@ -419,7 +420,7 @@ func (d *DNSData) ParseFromMsg(msg *dns.Msg) error {
 	for _, record := range allRecords {
 		switch recordType := record.(type) {
 		case *dns.A:
-			if CheckInternalIPs && internalRangeCheckerInstance.ContainsIPv4(recordType.A) {
+			if CheckInternalIPs && internalRangeCheckerInstance != nil && internalRangeCheckerInstance.ContainsIPv4(recordType.A) {
 				d.Internal = true
 			}
 			d.A = append(d.A, trimChars(recordType.A.String()))
