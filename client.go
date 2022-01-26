@@ -419,7 +419,7 @@ type DNSData struct {
 	NS            []string   `json:"ns,omitempty"`
 	TXT           []string   `json:"txt,omitempty"`
 	Raw           string     `json:"raw,omitempty"`
-	Internal      bool       `json:"internal,omitempty"`
+	Internal      bool       `json:"internal"`
 	StatusCode    string     `json:"status_code,omitempty"`
 	StatusCodeRaw int        `json:"status_code_raw,omitempty"`
 	TraceData     *TraceData `json:"trace,omitempty"`
