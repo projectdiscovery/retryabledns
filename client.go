@@ -419,7 +419,8 @@ type DNSData struct {
 	NS            []string   `json:"ns,omitempty"`
 	TXT           []string   `json:"txt,omitempty"`
 	Raw           string     `json:"raw,omitempty"`
-	Internal      bool       `json:"internal"`
+	isInternalIP  bool       `json:"isInternalIP"`
+	InternalIP    []string   `json:"internalIP",omitempty`
 	StatusCode    string     `json:"status_code,omitempty"`
 	StatusCodeRaw int        `json:"status_code_raw,omitempty"`
 	TraceData     *TraceData `json:"trace,omitempty"`
@@ -440,7 +441,7 @@ func (d *DNSData) ParseFromMsg(msg *dns.Msg) error {
 		switch recordType := record.(type) {
 		case *dns.A:
 			if CheckInternalIPs && internalRangeCheckerInstance != nil && internalRangeCheckerInstance.ContainsIPv4(recordType.A) {
-				d.Internal = true
+				d.isInternalIP = true
 			}
 			d.A = append(d.A, trimChars(recordType.A.String()))
 		case *dns.NS:
@@ -460,7 +461,7 @@ func (d *DNSData) ParseFromMsg(msg *dns.Msg) error {
 			}
 		case *dns.AAAA:
 			if CheckInternalIPs && internalRangeCheckerInstance.ContainsIPv6(recordType.AAAA) {
-				d.Internal = true
+				d.isInternalIP = true
 			}
 			d.AAAA = append(d.AAAA, trimChars(recordType.AAAA.String()))
 		}
