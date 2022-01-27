@@ -407,24 +407,25 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*Trac
 
 // DNSData is the data for a DNS request response
 type DNSData struct {
-	Host          string     `json:"host,omitempty"`
-	TTL           int        `json:"ttl,omitempty"`
-	Resolver      []string   `json:"resolver,omitempty"`
-	A             []string   `json:"a,omitempty"`
-	AAAA          []string   `json:"aaaa,omitempty"`
-	CNAME         []string   `json:"cname,omitempty"`
-	MX            []string   `json:"mx,omitempty"`
-	PTR           []string   `json:"ptr,omitempty"`
-	SOA           []string   `json:"soa,omitempty"`
-	NS            []string   `json:"ns,omitempty"`
-	TXT           []string   `json:"txt,omitempty"`
-	Raw           string     `json:"raw,omitempty"`
-	Internal      bool       `json:"internal,omitempty"`
-	StatusCode    string     `json:"status_code,omitempty"`
-	StatusCodeRaw int        `json:"status_code_raw,omitempty"`
-	TraceData     *TraceData `json:"trace,omitempty"`
-	RawResp       *dns.Msg   `json:"raw_resp,omitempty"`
-	Timestamp     time.Time  `json:"timestamp,omitempty"`
+	Host           string     `json:"host,omitempty"`
+	TTL            int        `json:"ttl,omitempty"`
+	Resolver       []string   `json:"resolver,omitempty"`
+	A              []string   `json:"a,omitempty"`
+	AAAA           []string   `json:"aaaa,omitempty"`
+	CNAME          []string   `json:"cname,omitempty"`
+	MX             []string   `json:"mx,omitempty"`
+	PTR            []string   `json:"ptr,omitempty"`
+	SOA            []string   `json:"soa,omitempty"`
+	NS             []string   `json:"ns,omitempty"`
+	TXT            []string   `json:"txt,omitempty"`
+	Raw            string     `json:"raw,omitempty"`
+	HasInternalIPs bool       `json:"has_internal_ips"`
+	InternalIPs    []string   `json:"internal_ips,omitempty"`
+	StatusCode     string     `json:"status_code,omitempty"`
+	StatusCodeRaw  int        `json:"status_code_raw,omitempty"`
+	TraceData      *TraceData `json:"trace,omitempty"`
+	RawResp        *dns.Msg   `json:"raw_resp,omitempty"`
+	Timestamp      time.Time  `json:"timestamp,omitempty"`
 }
 
 // CheckInternalIPs when set to true returns if DNS response IPs
@@ -440,7 +441,8 @@ func (d *DNSData) ParseFromMsg(msg *dns.Msg) error {
 		switch recordType := record.(type) {
 		case *dns.A:
 			if CheckInternalIPs && internalRangeCheckerInstance != nil && internalRangeCheckerInstance.ContainsIPv4(recordType.A) {
-				d.Internal = true
+				d.HasInternalIPs = true
+				d.InternalIPs = append(d.InternalIPs, trimChars(recordType.A.String()))
 			}
 			d.A = append(d.A, trimChars(recordType.A.String()))
 		case *dns.NS:
@@ -460,7 +462,8 @@ func (d *DNSData) ParseFromMsg(msg *dns.Msg) error {
 			}
 		case *dns.AAAA:
 			if CheckInternalIPs && internalRangeCheckerInstance.ContainsIPv6(recordType.AAAA) {
-				d.Internal = true
+				d.HasInternalIPs = true
+				d.InternalIPs = append(d.InternalIPs, trimChars(recordType.AAAA.String()))
 			}
 			d.AAAA = append(d.AAAA, trimChars(recordType.AAAA.String()))
 		}
