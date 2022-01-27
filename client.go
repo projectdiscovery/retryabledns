@@ -400,7 +400,7 @@ type DNSData struct {
 	NS             []string   `json:"ns,omitempty"`
 	TXT            []string   `json:"txt,omitempty"`
 	Raw            string     `json:"raw,omitempty"`
-	HasInternalIPs bool       `json:"has_internal_ips,omitempty"`
+	HasInternalIPs bool       `json:"has_internal_ips"`
 	InternalIPs    []string   `json:"internal_ips,omitempty"`
 	StatusCode     string     `json:"status_code,omitempty"`
 	StatusCodeRaw  int        `json:"status_code_raw,omitempty"`
