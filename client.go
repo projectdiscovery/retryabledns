@@ -97,7 +97,7 @@ func (c *Client) ResolveWithSyscall(host string) (*DNSData, error) {
 // Resolve is the underlying resolve function that actually resolves a host
 // and gets the ip records for that host.
 func (c *Client) Resolve(host string) (*DNSData, error) {
-	return c.Query(host, dns.TypeA)
+	return c.QueryMultiple(host, []uint16{dns.TypeA, dns.TypeAAAA})
 }
 
 // Do sends a provided dns request and return the raw native response
