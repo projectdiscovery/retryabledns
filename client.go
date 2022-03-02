@@ -262,7 +262,10 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 
 			// https://github.com/projectdiscovery/retryabledns/issues/25
 			if resp.Truncated && c.TCPFallback {
-				resp, _, _ = c.tcpClient.Exchange(msg, resolver.String())
+				resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
+				if err != nil || resp == nil {
+					continue
+				}
 			}
 
 			err = dnsdata.ParseFromMsg(resp)
