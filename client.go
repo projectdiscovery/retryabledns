@@ -185,6 +185,11 @@ func (c *Client) NS(host string) (*DNSData, error) {
 	return c.QueryMultiple(host, []uint16{dns.TypeNS})
 }
 
+// CAA helper function
+func (c *Client) CAA(host string) (*DNSData, error) {
+	return c.QueryMultiple(host, []uint16{dns.TypeCAA})
+}
+
 // QueryMultiple sends a provided dns request and return the data
 func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, error) {
 	var (
@@ -429,6 +434,7 @@ type DNSData struct {
 	TraceData      *TraceData `json:"trace,omitempty"`
 	RawResp        *dns.Msg   `json:"raw_resp,omitempty"`
 	Timestamp      time.Time  `json:"timestamp,omitempty"`
+	CAA            []string   `json:"caa,omitempty"`
 }
 
 // CheckInternalIPs when set to true returns if DNS response IPs
@@ -459,6 +465,8 @@ func (d *DNSData) ParseFromMsg(msg *dns.Msg) error {
 			d.PTR = append(d.PTR, trimChars(recordType.Ptr))
 		case *dns.MX:
 			d.MX = append(d.MX, trimChars(recordType.Mx))
+		case *dns.CAA:
+			d.CAA = append(d.CAA, trimChars(recordType.Value))
 		case *dns.TXT:
 			for _, txt := range recordType.Txt {
 				d.TXT = append(d.TXT, trimChars(txt))
@@ -476,7 +484,7 @@ func (d *DNSData) ParseFromMsg(msg *dns.Msg) error {
 }
 
 func (d *DNSData) contains() bool {
-	return len(d.A) > 0 || len(d.AAAA) > 0 || len(d.CNAME) > 0 || len(d.MX) > 0 || len(d.NS) > 0 || len(d.PTR) > 0 || len(d.TXT) > 0 || len(d.SOA) > 0
+	return len(d.A) > 0 || len(d.AAAA) > 0 || len(d.CNAME) > 0 || len(d.MX) > 0 || len(d.NS) > 0 || len(d.PTR) > 0 || len(d.TXT) > 0 || len(d.SOA) > 0 || len(d.CAA) > 0
 }
 
 // JSON returns the object as json string
@@ -499,6 +507,7 @@ func (d *DNSData) dedupe() {
 	d.SOA = deduplicate(d.SOA)
 	d.NS = deduplicate(d.NS)
 	d.TXT = deduplicate(d.TXT)
+	d.CAA = deduplicate(d.CAA)
 }
 
 // Marshal encodes the dnsdata to a binary representation
