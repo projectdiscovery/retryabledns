@@ -185,6 +185,11 @@ func (c *Client) NS(host string) (*DNSData, error) {
 	return c.QueryMultiple(host, []uint16{dns.TypeNS})
 }
 
+// AFXR helper function
+func (c *Client) AFXR(host string) (*DNSData, error) {
+	return c.QueryMultiple(host, []uint16{dns.TypeAXFR})
+}
+
 // QueryMultiple sends a provided dns request and return the data
 func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, error) {
 	var (
@@ -207,14 +212,16 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 
 	msg := &dns.Msg{}
 	msg.Id = dns.Id()
-	msg.RecursionDesired = true
-	msg.Question = make([]dns.Question, 1)
+	msg.SetEdns0(4096, false)
 
 	for _, requestType := range requestTypes {
 		name := dns.Fqdn(host)
+		msg.Question = make([]dns.Question, 1)
 
-		// In case of PTR adjust the domain name
-		if requestType == dns.TypePTR {
+		switch requestType {
+		case dns.TypeAXFR:
+			msg.SetAxfr(name)
+		case dns.TypePTR: // In case of PTR adjust the domain name
 			var err error
 			if net.ParseIP(host) != nil {
 				name, err = dns.ReverseAddr(host)
@@ -222,32 +229,54 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 					return nil, err
 				}
 			}
+			fallthrough
+		default:
+			// Enable Extension Mechanisms for DNS for all messages
+			msg.RecursionDesired = true
+			question := dns.Question{
+				Name:   name,
+				Qtype:  requestType,
+				Qclass: dns.ClassINET,
+			}
+			msg.Question[0] = question
 		}
 
-		question := dns.Question{
-			Name:   name,
-			Qtype:  requestType,
-			Qclass: dns.ClassINET,
-		}
-		msg.Question[0] = question
-
-		// Enable Extension Mechanisms for DNS for all messages
-		msg.SetEdns0(4096, false)
-
-		var resp *dns.Msg
+		var (
+			resp   *dns.Msg
+			trResp chan *dns.Envelope
+		)
 		for i := 0; i < c.options.MaxRetries; i++ {
 			index := atomic.AddUint32(&c.serversIndex, 1)
 			resolver := c.resolvers[index%uint32(len(c.resolvers))]
-
 			switch r := resolver.(type) {
 			case *NetworkResolver:
-				switch r.Protocol {
-				case TCP:
-					resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
-				case UDP:
-					resp, _, err = c.udpClient.Exchange(msg, resolver.String())
-				case DOT:
-					resp, _, err = c.dotClient.Exchange(msg, resolver.String())
+				if requestType == dns.TypeAXFR {
+					var dnsconn *dns.Conn
+					switch r.Protocol {
+					case TCP:
+						dnsconn, err = c.tcpClient.Dial(resolver.String())
+					case UDP:
+						dnsconn, err = c.udpClient.Dial(resolver.String())
+					case DOT:
+						dnsconn, err = c.dotClient.Dial(resolver.String())
+					default:
+						dnsconn, err = c.tcpClient.Dial(resolver.String())
+					}
+					if err != nil {
+						break
+					}
+					defer dnsconn.Close()
+					dnsTransfer := &dns.Transfer{Conn: dnsconn}
+					trResp, err = dnsTransfer.In(msg, resolver.String())
+				} else {
+					switch r.Protocol {
+					case TCP:
+						resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
+					case UDP:
+						resp, _, err = c.udpClient.Exchange(msg, resolver.String())
+					case DOT:
+						resp, _, err = c.dotClient.Exchange(msg, resolver.String())
+					}
 				}
 			case *DohResolver:
 				method := doh.MethodPost
@@ -256,26 +285,37 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 				}
 				resp, err = c.dohClient.QueryWithDOHMsg(method, doh.Resolver{URL: r.URL}, msg)
 			}
-			if err != nil || resp == nil {
+
+			if err != nil || (trResp == nil && resp == nil) {
 				continue
 			}
 
 			// https://github.com/projectdiscovery/retryabledns/issues/25
-			if resp.Truncated && c.TCPFallback {
+			if resp != nil && resp.Truncated && c.TCPFallback {
 				resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
 				if err != nil || resp == nil {
 					continue
 				}
 			}
 
-			err = dnsdata.ParseFromMsg(resp)
+			switch requestType {
+			case dns.TypeAXFR:
+				err = dnsdata.ParseFromEnvelopeChan(trResp)
+			default:
+				err = dnsdata.ParseFromMsg(resp)
+			}
 
 			// populate anyway basic info
 			dnsdata.Host = host
-			dnsdata.StatusCode = dns.RcodeToString[resp.Rcode]
-			dnsdata.StatusCodeRaw = resp.Rcode
+			switch {
+			case resp != nil:
+				dnsdata.StatusCode = dns.RcodeToString[resp.Rcode]
+				dnsdata.StatusCodeRaw = resp.Rcode
+				dnsdata.Raw += resp.String()
+			case trResp != nil:
+				// pass
+			}
 			dnsdata.Timestamp = time.Now()
-			dnsdata.Raw += resp.String()
 			dnsdata.Resolver = append(dnsdata.Resolver, resolver.String())
 
 			if err != nil || !dnsdata.contains() {
@@ -284,7 +324,10 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 			dnsdata.dedupe()
 
 			// stop on success
-			if resp.Rcode == dns.RcodeSuccess {
+			if resp != nil && resp.Rcode == dns.RcodeSuccess {
+				break
+			}
+			if trResp != nil {
 				break
 			}
 		}
@@ -422,7 +465,8 @@ type DNSData struct {
 	NS             []string   `json:"ns,omitempty"`
 	TXT            []string   `json:"txt,omitempty"`
 	Raw            string     `json:"raw,omitempty"`
-	HasInternalIPs bool       `json:"has_internal_ips"`
+	IsZoneTransfer bool       `json:"is_zone_transfer,omitempty"`
+	HasInternalIPs bool       `json:"has_internal_ips,omitempty"`
 	InternalIPs    []string   `json:"internal_ips,omitempty"`
 	StatusCode     string     `json:"status_code,omitempty"`
 	StatusCodeRaw  int        `json:"status_code_raw,omitempty"`
@@ -435,12 +479,8 @@ type DNSData struct {
 // belong to internal IP ranges.
 var CheckInternalIPs = false
 
-// ParseFromMsg and enrich data
-func (d *DNSData) ParseFromMsg(msg *dns.Msg) error {
-	allRecords := append(msg.Answer, msg.Extra...)
-	allRecords = append(allRecords, msg.Ns...)
-
-	for _, record := range allRecords {
+func (d *DNSData) ParseFromRR(rrs []dns.RR) error {
+	for _, record := range rrs {
 		switch recordType := record.(type) {
 		case *dns.A:
 			if CheckInternalIPs && internalRangeCheckerInstance != nil && internalRangeCheckerInstance.ContainsIPv4(recordType.A) {
@@ -471,8 +511,26 @@ func (d *DNSData) ParseFromMsg(msg *dns.Msg) error {
 			d.AAAA = append(d.AAAA, trimChars(recordType.AAAA.String()))
 		}
 	}
-
 	return nil
+}
+
+// ParseFromMsg and enrich data
+func (d *DNSData) ParseFromMsg(msg *dns.Msg) error {
+	allRecords := append(msg.Answer, msg.Extra...)
+	allRecords = append(allRecords, msg.Ns...)
+	return d.ParseFromRR(allRecords)
+}
+
+func (d *DNSData) ParseFromEnvelopeChan(envChan chan *dns.Envelope) error {
+	var allRecords []dns.RR
+	for env := range envChan {
+		if env.Error != nil {
+			return env.Error
+		}
+		allRecords = append(allRecords, env.RR...)
+	}
+	d.IsZoneTransfer = true
+	return d.ParseFromRR(allRecords)
 }
 
 func (d *DNSData) contains() bool {
