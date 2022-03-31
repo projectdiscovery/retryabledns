@@ -511,6 +511,7 @@ type DNSData struct {
 	SOA            []string   `json:"soa,omitempty"`
 	NS             []string   `json:"ns,omitempty"`
 	TXT            []string   `json:"txt,omitempty"`
+	CAA            []string   `json:"caa,omitempty"`
 	Raw            string     `json:"raw,omitempty"`
 	HasInternalIPs bool       `json:"has_internal_ips,omitempty"`
 	InternalIPs    []string   `json:"internal_ips,omitempty"`
@@ -556,6 +557,8 @@ func (d *DNSData) ParseFromRR(rrs []dns.RR) error {
 				d.InternalIPs = append(d.InternalIPs, trimChars(recordType.AAAA.String()))
 			}
 			d.AAAA = append(d.AAAA, trimChars(recordType.AAAA.String()))
+		case *dns.CAA:
+			d.CAA = append(d.CAA, recordType.String())
 		}
 	}
 	return nil
