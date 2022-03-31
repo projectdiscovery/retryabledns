@@ -185,13 +185,23 @@ func (c *Client) NS(host string) (*DNSData, error) {
 	return c.QueryMultiple(host, []uint16{dns.TypeNS})
 }
 
-// AFXR helper function
-func (c *Client) AFXR(host string) (*DNSData, error) {
-	return c.QueryMultiple(host, []uint16{dns.TypeAXFR})
+// AXFR helper function
+func (c *Client) AXFR(host string) ([]*DNSData, error) {
+	return c.axfr(host)
+}
+
+// QueryMultiple sends a provided dns request and return the data with a specific resolver
+func (c *Client) QueryMultipleWithResolver(host string, requestTypes []uint16, resolver Resolver) (*DNSData, error) {
+	return c.queryMultiple(host, requestTypes, resolver)
 }
 
 // QueryMultiple sends a provided dns request and return the data
 func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, error) {
+	return c.queryMultiple(host, requestTypes, nil)
+}
+
+// QueryMultiple sends a provided dns request and return the data
+func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Resolver) (*DNSData, error) {
 	var (
 		dnsdata DNSData
 		err     error
@@ -247,7 +257,9 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 		)
 		for i := 0; i < c.options.MaxRetries; i++ {
 			index := atomic.AddUint32(&c.serversIndex, 1)
-			resolver := c.resolvers[index%uint32(len(c.resolvers))]
+			if resolver == nil {
+				resolver = c.resolvers[index%uint32(len(c.resolvers))]
+			}
 			switch r := resolver.(type) {
 			case *NetworkResolver:
 				if requestType == dns.TypeAXFR {
@@ -374,7 +386,7 @@ func (c *Client) QueryParallel(host string, requestType uint16, resolvers []stri
 	return dnsdatas, nil
 }
 
-// QueryMultiple sends a provided dns request and return the data
+// Trace the requested domain with the provided query type
 func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*TraceData, error) {
 	var tracedata TraceData
 	host = dns.CanonicalName(host)
@@ -451,6 +463,41 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*Trac
 	return &tracedata, nil
 }
 
+func (c *Client) axfr(host string) ([]*DNSData, error) {
+	// obtain ns servers
+	dnsData, err := c.NS(host)
+	if err != nil {
+		return nil, err
+	}
+	// resolve ns servers to ips
+	var resolvers []Resolver
+
+	for _, ns := range dnsData.NS {
+		nsData, err := c.A(ns)
+		if err != nil {
+			continue
+		}
+		for _, a := range nsData.A {
+			resolvers = append(resolvers, &NetworkResolver{Protocol: TCP, Host: a, Port: "53"})
+		}
+	}
+
+	resolvers = append(resolvers, c.resolvers...)
+
+	var AXFRData []*DNSData
+	// perform zone transfer for each ns
+	for _, resolver := range resolvers {
+		nsData, err := c.QueryMultipleWithResolver("zonetransfer.me", []uint16{dns.TypeAXFR}, resolver)
+		if err != nil {
+			continue
+		}
+		AXFRData = append(AXFRData, nsData)
+	}
+	// perform the
+
+	return AXFRData, nil
+}
+
 // DNSData is the data for a DNS request response
 type DNSData struct {
 	Host           string     `json:"host,omitempty"`
@@ -465,12 +512,12 @@ type DNSData struct {
 	NS             []string   `json:"ns,omitempty"`
 	TXT            []string   `json:"txt,omitempty"`
 	Raw            string     `json:"raw,omitempty"`
-	IsZoneTransfer bool       `json:"is_zone_transfer,omitempty"`
 	HasInternalIPs bool       `json:"has_internal_ips,omitempty"`
 	InternalIPs    []string   `json:"internal_ips,omitempty"`
 	StatusCode     string     `json:"status_code,omitempty"`
 	StatusCodeRaw  int        `json:"status_code_raw,omitempty"`
 	TraceData      *TraceData `json:"trace,omitempty"`
+	AXFRData       []*DNSData `json:"axfr,omitempty"`
 	RawResp        *dns.Msg   `json:"raw_resp,omitempty"`
 	Timestamp      time.Time  `json:"timestamp,omitempty"`
 }
@@ -529,7 +576,6 @@ func (d *DNSData) ParseFromEnvelopeChan(envChan chan *dns.Envelope) error {
 		}
 		allRecords = append(allRecords, env.RR...)
 	}
-	d.IsZoneTransfer = true
 	return d.ParseFromRR(allRecords)
 }
 
