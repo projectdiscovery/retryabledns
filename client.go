@@ -18,6 +18,7 @@ import (
 	"github.com/projectdiscovery/retryabledns/doh"
 	"github.com/projectdiscovery/retryabledns/hostsfile"
 	"github.com/projectdiscovery/retryablehttp-go"
+	"github.com/projectdiscovery/sliceutil"
 )
 
 var internalRangeCheckerInstance *internalRangeChecker
@@ -52,7 +53,7 @@ func New(baseResolvers []string, maxRetries int) *Client {
 
 // New creates a new dns client with options
 func NewWithOptions(options Options) *Client {
-	parsedBaseResolvers := parseResolvers(deduplicate(options.BaseResolvers))
+	parsedBaseResolvers := parseResolvers(sliceutil.Dedupe(options.BaseResolvers))
 	var knownHosts map[string][]string
 	if options.Hostsfile {
 		knownHosts, _ = hostsfile.ParseDefault()
@@ -186,7 +187,7 @@ func (c *Client) NS(host string) (*DNSData, error) {
 }
 
 // AXFR helper function
-func (c *Client) AXFR(host string) ([]*DNSData, error) {
+func (c *Client) AXFR(host string) (*AXFRData, error) {
 	return c.axfr(host)
 }
 
@@ -438,7 +439,7 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*Trac
 				}
 			}
 		}
-		newNSResolvers = deduplicate(newNSResolvers)
+		newNSResolvers = sliceutil.Dedupe(newNSResolvers)
 
 		// if we have no new resolvers => return
 		if len(newNSResolvers) == 0 {
@@ -463,7 +464,7 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*Trac
 	return &tracedata, nil
 }
 
-func (c *Client) axfr(host string) ([]*DNSData, error) {
+func (c *Client) axfr(host string) (*AXFRData, error) {
 	// obtain ns servers
 	dnsData, err := c.NS(host)
 	if err != nil {
@@ -484,18 +485,17 @@ func (c *Client) axfr(host string) ([]*DNSData, error) {
 
 	resolvers = append(resolvers, c.resolvers...)
 
-	var AXFRData []*DNSData
+	var data []*DNSData
 	// perform zone transfer for each ns
 	for _, resolver := range resolvers {
-		nsData, err := c.QueryMultipleWithResolver("zonetransfer.me", []uint16{dns.TypeAXFR}, resolver)
+		nsData, err := c.QueryMultipleWithResolver(host, []uint16{dns.TypeAXFR}, resolver)
 		if err != nil {
 			continue
 		}
-		AXFRData = append(AXFRData, nsData)
+		data = append(data, nsData)
 	}
-	// perform the
 
-	return AXFRData, nil
+	return &AXFRData{Host: host, DNSData: data}, nil
 }
 
 // DNSData is the data for a DNS request response
@@ -512,13 +512,14 @@ type DNSData struct {
 	NS             []string   `json:"ns,omitempty"`
 	TXT            []string   `json:"txt,omitempty"`
 	CAA            []string   `json:"caa,omitempty"`
+	AllRecords     []string   `json:"all,omitempty"`
 	Raw            string     `json:"raw,omitempty"`
 	HasInternalIPs bool       `json:"has_internal_ips,omitempty"`
 	InternalIPs    []string   `json:"internal_ips,omitempty"`
 	StatusCode     string     `json:"status_code,omitempty"`
 	StatusCodeRaw  int        `json:"status_code_raw,omitempty"`
 	TraceData      *TraceData `json:"trace,omitempty"`
-	AXFRData       []*DNSData `json:"axfr,omitempty"`
+	AXFRData       *AXFRData  `json:"axfr,omitempty"`
 	RawResp        *dns.Msg   `json:"raw_resp,omitempty"`
 	Timestamp      time.Time  `json:"timestamp,omitempty"`
 }
@@ -560,6 +561,7 @@ func (d *DNSData) ParseFromRR(rrs []dns.RR) error {
 		case *dns.CAA:
 			d.CAA = append(d.CAA, recordType.String())
 		}
+		d.AllRecords = append(d.AllRecords, record.String())
 	}
 	return nil
 }
@@ -597,15 +599,16 @@ func trimChars(s string) string {
 }
 
 func (d *DNSData) dedupe() {
-	d.Resolver = deduplicate(d.Resolver)
-	d.A = deduplicate(d.A)
-	d.AAAA = deduplicate(d.AAAA)
-	d.CNAME = deduplicate(d.CNAME)
-	d.MX = deduplicate(d.MX)
-	d.PTR = deduplicate(d.PTR)
-	d.SOA = deduplicate(d.SOA)
-	d.NS = deduplicate(d.NS)
-	d.TXT = deduplicate(d.TXT)
+	d.Resolver = sliceutil.Dedupe(d.Resolver)
+	d.A = sliceutil.Dedupe(d.A)
+	d.AAAA = sliceutil.Dedupe(d.AAAA)
+	d.CNAME = sliceutil.Dedupe(d.CNAME)
+	d.MX = sliceutil.Dedupe(d.MX)
+	d.PTR = sliceutil.Dedupe(d.PTR)
+	d.SOA = sliceutil.Dedupe(d.SOA)
+	d.NS = sliceutil.Dedupe(d.NS)
+	d.TXT = sliceutil.Dedupe(d.TXT)
+	d.AllRecords = sliceutil.Dedupe(d.AllRecords)
 }
 
 // Marshal encodes the dnsdata to a binary representation
@@ -625,24 +628,13 @@ func (d *DNSData) Unmarshal(b []byte) error {
 	return dec.Decode(&d)
 }
 
-// deduplicate returns a new slice with duplicates values removed.
-func deduplicate(s []string) []string {
-	if len(s) < 2 {
-		return s
-	}
-	var results []string
-	seen := make(map[string]struct{})
-	for _, val := range s {
-		if _, ok := seen[val]; !ok {
-			results = append(results, val)
-			seen[val] = struct{}{}
-		}
-	}
-	return results
-}
-
 // TraceData contains the trace information for a dns query
 type TraceData struct {
+	Host    string     `json:"host,omitempty"`
+	DNSData []*DNSData `json:"chain,omitempty"`
+}
+
+type AXFRData struct {
 	Host    string     `json:"host,omitempty"`
 	DNSData []*DNSData `json:"chain,omitempty"`
 }
