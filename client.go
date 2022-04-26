@@ -186,7 +186,6 @@ func (c *Client) NS(host string) (*DNSData, error) {
 	return c.QueryMultiple(host, []uint16{dns.TypeNS})
 }
 
-// AXFR helper function
 func (c *Client) AXFR(host string) (*AXFRData, error) {
 	return c.axfr(host)
 }
@@ -194,6 +193,11 @@ func (c *Client) AXFR(host string) (*AXFRData, error) {
 // QueryMultiple sends a provided dns request and return the data with a specific resolver
 func (c *Client) QueryMultipleWithResolver(host string, requestTypes []uint16, resolver Resolver) (*DNSData, error) {
 	return c.queryMultiple(host, requestTypes, resolver)
+}
+
+// CAA helper function
+func (c *Client) CAA(host string) (*DNSData, error) {
+	return c.QueryMultiple(host, []uint16{dns.TypeCAA})
 }
 
 // QueryMultiple sends a provided dns request and return the data
@@ -522,6 +526,7 @@ type DNSData struct {
 	AXFRData       *AXFRData  `json:"axfr,omitempty"`
 	RawResp        *dns.Msg   `json:"raw_resp,omitempty"`
 	Timestamp      time.Time  `json:"timestamp,omitempty"`
+	CAA            []string   `json:"caa,omitempty"`
 }
 
 // CheckInternalIPs when set to true returns if DNS response IPs
@@ -548,6 +553,8 @@ func (d *DNSData) ParseFromRR(rrs []dns.RR) error {
 			d.PTR = append(d.PTR, trimChars(recordType.Ptr))
 		case *dns.MX:
 			d.MX = append(d.MX, trimChars(recordType.Mx))
+		case *dns.CAA:
+			d.CAA = append(d.CAA, trimChars(recordType.Value))
 		case *dns.TXT:
 			for _, txt := range recordType.Txt {
 				d.TXT = append(d.TXT, trimChars(txt))
@@ -585,7 +592,7 @@ func (d *DNSData) ParseFromEnvelopeChan(envChan chan *dns.Envelope) error {
 }
 
 func (d *DNSData) contains() bool {
-	return len(d.A) > 0 || len(d.AAAA) > 0 || len(d.CNAME) > 0 || len(d.MX) > 0 || len(d.NS) > 0 || len(d.PTR) > 0 || len(d.TXT) > 0 || len(d.SOA) > 0
+	return len(d.A) > 0 || len(d.AAAA) > 0 || len(d.CNAME) > 0 || len(d.MX) > 0 || len(d.NS) > 0 || len(d.PTR) > 0 || len(d.TXT) > 0 || len(d.SOA) > 0 || len(d.CAA) > 0
 }
 
 // JSON returns the object as json string
@@ -599,16 +606,17 @@ func trimChars(s string) string {
 }
 
 func (d *DNSData) dedupe() {
-	d.Resolver = sliceutil.Dedupe(d.Resolver)
-	d.A = sliceutil.Dedupe(d.A)
-	d.AAAA = sliceutil.Dedupe(d.AAAA)
-	d.CNAME = sliceutil.Dedupe(d.CNAME)
-	d.MX = sliceutil.Dedupe(d.MX)
-	d.PTR = sliceutil.Dedupe(d.PTR)
-	d.SOA = sliceutil.Dedupe(d.SOA)
-	d.NS = sliceutil.Dedupe(d.NS)
-	d.TXT = sliceutil.Dedupe(d.TXT)
-	d.AllRecords = sliceutil.Dedupe(d.AllRecords)
+	d.Resolver = deduplicate(d.Resolver)
+	d.A = deduplicate(d.A)
+	d.AAAA = deduplicate(d.AAAA)
+	d.CNAME = deduplicate(d.CNAME)
+	d.MX = deduplicate(d.MX)
+	d.PTR = deduplicate(d.PTR)
+	d.SOA = deduplicate(d.SOA)
+	d.NS = deduplicate(d.NS)
+	d.TXT = deduplicate(d.TXT)
+	d.CAA = deduplicate(d.CAA)
+  d.AllRecords = sliceutil.Dedupe(d.AllRecords)
 }
 
 // Marshal encodes the dnsdata to a binary representation
