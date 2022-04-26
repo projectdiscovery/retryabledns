@@ -526,7 +526,6 @@ type DNSData struct {
 	AXFRData       *AXFRData  `json:"axfr,omitempty"`
 	RawResp        *dns.Msg   `json:"raw_resp,omitempty"`
 	Timestamp      time.Time  `json:"timestamp,omitempty"`
-	CAA            []string   `json:"caa,omitempty"`
 }
 
 // CheckInternalIPs when set to true returns if DNS response IPs
@@ -565,8 +564,6 @@ func (d *DNSData) ParseFromRR(rrs []dns.RR) error {
 				d.InternalIPs = append(d.InternalIPs, trimChars(recordType.AAAA.String()))
 			}
 			d.AAAA = append(d.AAAA, trimChars(recordType.AAAA.String()))
-		case *dns.CAA:
-			d.CAA = append(d.CAA, recordType.String())
 		}
 		d.AllRecords = append(d.AllRecords, record.String())
 	}
@@ -606,17 +603,17 @@ func trimChars(s string) string {
 }
 
 func (d *DNSData) dedupe() {
-	d.Resolver = deduplicate(d.Resolver)
-	d.A = deduplicate(d.A)
-	d.AAAA = deduplicate(d.AAAA)
-	d.CNAME = deduplicate(d.CNAME)
-	d.MX = deduplicate(d.MX)
-	d.PTR = deduplicate(d.PTR)
-	d.SOA = deduplicate(d.SOA)
-	d.NS = deduplicate(d.NS)
-	d.TXT = deduplicate(d.TXT)
-	d.CAA = deduplicate(d.CAA)
-  d.AllRecords = sliceutil.Dedupe(d.AllRecords)
+	d.Resolver = sliceutil.Dedupe(d.Resolver)
+	d.A = sliceutil.Dedupe(d.A)
+	d.AAAA = sliceutil.Dedupe(d.AAAA)
+	d.CNAME = sliceutil.Dedupe(d.CNAME)
+	d.MX = sliceutil.Dedupe(d.MX)
+	d.PTR = sliceutil.Dedupe(d.PTR)
+	d.SOA = sliceutil.Dedupe(d.SOA)
+	d.NS = sliceutil.Dedupe(d.NS)
+	d.TXT = sliceutil.Dedupe(d.TXT)
+	d.CAA = sliceutil.Dedupe(d.CAA)
+	d.AllRecords = sliceutil.Dedupe(d.AllRecords)
 }
 
 // Marshal encodes the dnsdata to a binary representation
