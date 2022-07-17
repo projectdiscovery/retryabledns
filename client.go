@@ -223,6 +223,9 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 				}
 			}
 		}
+		if len(dnsdata.AAAA)+len(dnsdata.A) > 0 {
+			dnsdata.HostsFile = true
+		}
 	}
 
 	msg := &dns.Msg{}
@@ -526,6 +529,7 @@ type DNSData struct {
 	AXFRData       *AXFRData  `json:"axfr,omitempty"`
 	RawResp        *dns.Msg   `json:"raw_resp,omitempty"`
 	Timestamp      time.Time  `json:"timestamp,omitempty"`
+	HostsFile      bool       `json:"hosts_file,omitempty"`
 }
 
 // CheckInternalIPs when set to true returns if DNS response IPs
