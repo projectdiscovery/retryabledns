@@ -3,6 +3,7 @@ package hostsfile
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"runtime"
 	"strings"
@@ -11,8 +12,12 @@ import (
 	"github.com/projectdiscovery/stringsutil"
 )
 
+const (
+	localhostName = "localhost"
+)
+
 func Path() string {
-	if runtime.GOOS == "windows" {
+	if isWindows() {
 		return fmt.Sprintf(`%s\System32\Drivers\etc\hosts`, os.Getenv("SystemRoot"))
 	}
 	return "/etc/hosts"
@@ -52,5 +57,19 @@ func Parse(p string) (map[string][]string, error) {
 			}
 		}
 	}
+
+	// windows 11 resolves localhost with system dns resolver
+	if _, ok := items[localhostName]; !ok && isWindows() {
+		localhostIPs, err := net.LookupHost(localhostName)
+		if err != nil {
+			return nil, err
+		}
+		items[localhostName] = localhostIPs
+	}
+
 	return items, nil
+}
+
+func isWindows() bool {
+	return runtime.GOOS == "windows"
 }
