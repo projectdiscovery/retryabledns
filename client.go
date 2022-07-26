@@ -47,12 +47,15 @@ type Client struct {
 }
 
 // New creates a new dns client
-func New(baseResolvers []string, maxRetries int) *Client {
+func New(baseResolvers []string, maxRetries int) (*Client, error) {
 	return NewWithOptions(Options{BaseResolvers: baseResolvers, MaxRetries: maxRetries})
 }
 
 // New creates a new dns client with options
-func NewWithOptions(options Options) *Client {
+func NewWithOptions(options Options) (*Client, error) {
+	if err := options.Validate(); err != nil {
+		return nil, err
+	}
 	parsedBaseResolvers := parseResolvers(sliceutil.Dedupe(options.BaseResolvers))
 	var knownHosts map[string][]string
 	if options.Hostsfile {
@@ -73,7 +76,7 @@ func NewWithOptions(options Options) *Client {
 		dotClient:  &dns.Client{Net: "tcp-tls", Timeout: options.Timeout},
 		knownHosts: knownHosts,
 	}
-	return &client
+	return &client, nil
 }
 
 // ResolveWithSyscall attempts to resolve the host through system calls
