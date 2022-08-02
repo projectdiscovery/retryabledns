@@ -47,7 +47,10 @@ func Parse(p string) (map[string][]string, error) {
 
 		// discard comment part
 		if strings.Contains(line, "#") {
-			line = stringsutil.Before(line, "#")
+			line, err = stringsutil.Before(line, "#")
+			if err != nil {
+				return nil, err
+			}
 		}
 		tokens := strings.Fields(line)
 		if len(tokens) > 1 {
