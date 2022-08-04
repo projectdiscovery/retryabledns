@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/projectdiscovery/fileutil"
-	"github.com/projectdiscovery/stringsutil"
 )
 
 const (
@@ -46,8 +45,8 @@ func Parse(p string) (map[string][]string, error) {
 		}
 
 		// discard comment part
-		if strings.Contains(line, "#") {
-			line = stringsutil.Before(line, "#")
+		if idx := strings.Index(line, "#"); idx > 0 {
+			line = line[:idx]
 		}
 		tokens := strings.Fields(line)
 		if len(tokens) > 1 {
