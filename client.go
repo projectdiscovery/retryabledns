@@ -179,6 +179,11 @@ func (c *Client) TXT(host string) (*DNSData, error) {
 	return c.QueryMultiple(host, []uint16{dns.TypeTXT})
 }
 
+// SRV helper function
+func (c *Client) SRV(host string) (*DNSData, error) {
+	return c.QueryMultiple(host, []uint16{dns.TypeSRV})
+}
+
 // PTR helper function
 func (c *Client) PTR(host string) (*DNSData, error) {
 	return c.QueryMultiple(host, []uint16{dns.TypePTR})
@@ -521,6 +526,7 @@ type DNSData struct {
 	SOA            []string   `json:"soa,omitempty"`
 	NS             []string   `json:"ns,omitempty"`
 	TXT            []string   `json:"txt,omitempty"`
+	SRV            []string   `json:"srv,omitempty"`
 	CAA            []string   `json:"caa,omitempty"`
 	AllRecords     []string   `json:"all,omitempty"`
 	Raw            string     `json:"raw,omitempty"`
@@ -565,6 +571,8 @@ func (d *DNSData) ParseFromRR(rrs []dns.RR) error {
 			for _, txt := range recordType.Txt {
 				d.TXT = append(d.TXT, trimChars(txt))
 			}
+		case *dns.SRV:
+			d.SRV = append(d.SRV, trimChars(recordType.Target))
 		case *dns.AAAA:
 			if CheckInternalIPs && internalRangeCheckerInstance.ContainsIPv6(recordType.AAAA) {
 				d.HasInternalIPs = true
@@ -596,7 +604,7 @@ func (d *DNSData) ParseFromEnvelopeChan(envChan chan *dns.Envelope) error {
 }
 
 func (d *DNSData) contains() bool {
-	return len(d.A) > 0 || len(d.AAAA) > 0 || len(d.CNAME) > 0 || len(d.MX) > 0 || len(d.NS) > 0 || len(d.PTR) > 0 || len(d.TXT) > 0 || len(d.SOA) > 0 || len(d.CAA) > 0
+	return len(d.A) > 0 || len(d.AAAA) > 0 || len(d.CNAME) > 0 || len(d.MX) > 0 || len(d.NS) > 0 || len(d.PTR) > 0 || len(d.TXT) > 0 || len(d.SRV) > 0 || len(d.SOA) > 0 || len(d.CAA) > 0
 }
 
 // JSON returns the object as json string
@@ -619,6 +627,7 @@ func (d *DNSData) dedupe() {
 	d.SOA = sliceutil.Dedupe(d.SOA)
 	d.NS = sliceutil.Dedupe(d.NS)
 	d.TXT = sliceutil.Dedupe(d.TXT)
+	d.SRV = sliceutil.Dedupe(d.SRV)
 	d.CAA = sliceutil.Dedupe(d.CAA)
 	d.AllRecords = sliceutil.Dedupe(d.AllRecords)
 }
