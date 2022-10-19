@@ -43,7 +43,7 @@ func main() {
     log.Println(ips)
 
     // Query Types: dns.TypeA, dns.TypeNS, dns.TypeCNAME, dns.TypeSOA, dns.TypePTR, dns.TypeMX
-    // dns.TypeTXT, dns.TypeAAAA (from github.com/miekg/dns)
+    // dns.TypeTXT, dns.TypeAAAA, dns.TypeSRV (from github.com/miekg/dns)
     dnsResponses, err := dnsClient.Query(hostname, dns.TypeA)
     if err != nil {
         log.Fatal(err)
