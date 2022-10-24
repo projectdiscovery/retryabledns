@@ -5,7 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"io/ioutil"
+	"io"
 	"net/http"
 
 	"github.com/miekg/dns"
@@ -117,7 +117,7 @@ func (c *Client) QueryWithDOHMsg(method Method, r Resolver, msg *dns.Msg) (*dns.
 		return nil, errors.New("empty response body")
 	}
 
-	respBodyBytes, err := ioutil.ReadAll(resp.Body)
+	respBodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
