@@ -8,6 +8,8 @@ require (
 	github.com/stretchr/testify v1.8.1
 )
 
+require github.com/kr/pretty v0.3.1 // indirect
+
 require (
 	github.com/asaskevich/govalidator v0.0.0-20210307081110-f21760c49a8d // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
@@ -16,7 +18,7 @@ require (
 	github.com/microcosm-cc/bluemonday v1.0.21 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/projectdiscovery/utils v0.0.2
+	github.com/projectdiscovery/utils v0.0.3
 	github.com/saintfish/chardet v0.0.0-20120816061221-3af4cd4741ca // indirect
 	go.uber.org/atomic v1.10.0 // indirect
 	go.uber.org/multierr v1.8.0 // indirect
