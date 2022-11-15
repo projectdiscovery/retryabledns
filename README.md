@@ -3,7 +3,7 @@ Based on `miekg/dns` and freely inspired by `bogdanovich/dns_resolver`.
 
 ## Features
 - Supports system default resolvers along with user supplied ones
-- Retries dns requests in case of I/O/Time/Network failures
+- Retries dns requests in case of I/O, Time, Network failures
 - Allows arbitrary query types
 - Resolution with random resolvers
 
