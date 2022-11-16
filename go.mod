@@ -4,11 +4,14 @@ go 1.18
 
 require (
 	github.com/miekg/dns v1.1.50
-	github.com/projectdiscovery/retryablehttp-go v1.0.2
+	github.com/projectdiscovery/retryablehttp-go v1.0.3
 	github.com/stretchr/testify v1.8.1
 )
 
-require github.com/kr/pretty v0.3.1 // indirect
+require (
+	github.com/Mzack9999/go-http-digest-auth-client v0.6.1-0.20220414142836-eb8883508809 // indirect
+	github.com/kr/pretty v0.3.1 // indirect
+)
 
 require (
 	github.com/asaskevich/govalidator v0.0.0-20210307081110-f21760c49a8d // indirect
