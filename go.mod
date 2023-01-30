@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/miekg/dns v1.1.50
-	github.com/projectdiscovery/retryablehttp-go v1.0.8
+	github.com/projectdiscovery/retryablehttp-go v1.0.10
 	github.com/stretchr/testify v1.8.1
 )
 
@@ -21,7 +21,7 @@ require (
 	github.com/microcosm-cc/bluemonday v1.0.21 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/projectdiscovery/utils v0.0.4-0.20221201124851-f8524345b6d3
+	github.com/projectdiscovery/utils v0.0.4-0.20230117135930-7371ae6a739d
 	github.com/saintfish/chardet v0.0.0-20120816061221-3af4cd4741ca // indirect
 	go.uber.org/atomic v1.10.0 // indirect
 	go.uber.org/multierr v1.8.0 // indirect
