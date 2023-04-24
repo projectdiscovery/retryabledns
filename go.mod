@@ -3,7 +3,7 @@ module github.com/projectdiscovery/retryabledns
 go 1.18
 
 require (
-	github.com/miekg/dns v1.1.50
+	github.com/miekg/dns v1.1.53
 	github.com/projectdiscovery/retryablehttp-go v1.0.15
 	github.com/stretchr/testify v1.8.2
 )
