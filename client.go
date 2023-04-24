@@ -517,7 +517,7 @@ func (c *Client) axfr(host string) (*AXFRData, error) {
 // DNSData is the data for a DNS request response
 type DNSData struct {
 	Host           string     `json:"host,omitempty"`
-	TTL            int        `json:"ttl,omitempty"`
+	TTL            uint32     `json:"ttl,omitempty"`
 	Resolver       []string   `json:"resolver,omitempty"`
 	A              []string   `json:"a,omitempty"`
 	AAAA           []string   `json:"aaaa,omitempty"`
@@ -548,6 +548,9 @@ var CheckInternalIPs = false
 
 func (d *DNSData) ParseFromRR(rrs []dns.RR) error {
 	for _, record := range rrs {
+		if d.TTL == 0 && record.Header().Ttl > 0 {
+			d.TTL = record.Header().Ttl
+		}
 		switch recordType := record.(type) {
 		case *dns.A:
 			if CheckInternalIPs && internalRangeCheckerInstance != nil && internalRangeCheckerInstance.ContainsIPv4(recordType.A) {
