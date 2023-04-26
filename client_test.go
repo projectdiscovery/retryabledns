@@ -72,6 +72,7 @@ func TestQueryMultiple(t *testing.T) {
 	// From current dig result
 	require.True(t, len(d.A) > 0)
 	require.True(t, len(d.AAAA) > 0)
+	require.NotZero(t, d.TTL)
 }
 
 func TestTrace(t *testing.T) {
