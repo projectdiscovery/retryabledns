@@ -189,6 +189,11 @@ func (c *Client) PTR(host string) (*DNSData, error) {
 	return c.QueryMultiple(host, []uint16{dns.TypePTR})
 }
 
+// ANY helper function
+func (c *Client) ANY(host string) (*DNSData, error) {
+	return c.QueryMultiple(host, []uint16{dns.TypeANY})
+}
+
 // NS helper function
 func (c *Client) NS(host string) (*DNSData, error) {
 	return c.QueryMultiple(host, []uint16{dns.TypeNS})
@@ -524,6 +529,7 @@ type DNSData struct {
 	CNAME          []string   `json:"cname,omitempty"`
 	MX             []string   `json:"mx,omitempty"`
 	PTR            []string   `json:"ptr,omitempty"`
+	ANY            []string   `json:"any,omitempty"`
 	SOA            []string   `json:"soa,omitempty"`
 	NS             []string   `json:"ns,omitempty"`
 	TXT            []string   `json:"txt,omitempty"`
@@ -608,7 +614,7 @@ func (d *DNSData) ParseFromEnvelopeChan(envChan chan *dns.Envelope) error {
 }
 
 func (d *DNSData) contains() bool {
-	return len(d.A) > 0 || len(d.AAAA) > 0 || len(d.CNAME) > 0 || len(d.MX) > 0 || len(d.NS) > 0 || len(d.PTR) > 0 || len(d.TXT) > 0 || len(d.SRV) > 0 || len(d.SOA) > 0 || len(d.CAA) > 0
+	return len(d.A) > 0 || len(d.AAAA) > 0 || len(d.CNAME) > 0 || len(d.MX) > 0 || len(d.NS) > 0 || len(d.PTR) > 0 || len(d.ANY) > 0 || len(d.TXT) > 0 || len(d.SRV) > 0 || len(d.SOA) > 0 || len(d.CAA) > 0
 }
 
 // JSON returns the object as json string
@@ -628,6 +634,7 @@ func (d *DNSData) dedupe() {
 	d.CNAME = sliceutil.Dedupe(d.CNAME)
 	d.MX = sliceutil.Dedupe(d.MX)
 	d.PTR = sliceutil.Dedupe(d.PTR)
+	d.ANY = sliceutil.Dedupe(d.ANY)
 	d.SOA = sliceutil.Dedupe(d.SOA)
 	d.NS = sliceutil.Dedupe(d.NS)
 	d.TXT = sliceutil.Dedupe(d.TXT)
