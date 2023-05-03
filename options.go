@@ -5,6 +5,11 @@ import (
 	"time"
 )
 
+var (
+	ErrMaxRetriesZero = errors.New("retries must be at least 1")
+	ErrResolversEmpty = errors.New("resolvers list must not be empty")
+)
+
 type Options struct {
 	BaseResolvers []string
 	MaxRetries    int
@@ -14,7 +19,11 @@ type Options struct {
 
 func (options *Options) Validate() error {
 	if options.MaxRetries == 0 {
-		return errors.New("retries must be at least 1")
+		return ErrMaxRetriesZero
+	}
+
+	if len(options.BaseResolvers) == 0 {
+		return ErrResolversEmpty
 	}
 	return nil
 }
