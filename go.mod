@@ -18,7 +18,7 @@ require (
 	github.com/microcosm-cc/bluemonday v1.0.23 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/projectdiscovery/utils v0.0.25
+	github.com/projectdiscovery/utils v0.0.26
 	github.com/saintfish/chardet v0.0.0-20120816061221-3af4cd4741ca // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/mod v0.8.0 // indirect
