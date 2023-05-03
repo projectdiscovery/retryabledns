@@ -573,8 +573,6 @@ func (d *DNSData) ParseFromRR(rrs []dns.RR) error {
 			d.SOA = append(d.SOA, trimChars(recordType.Mbox))
 		case *dns.PTR:
 			d.PTR = append(d.PTR, trimChars(recordType.Ptr))
-		case *dns.ANY:
-			d.ANY = append(d.ANY, trimChars("any"))
 		case *dns.MX:
 			d.MX = append(d.MX, trimChars(recordType.Mx))
 		case *dns.CAA:
