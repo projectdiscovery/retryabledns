@@ -38,7 +38,7 @@ const (
 	NS    QuestionType = "NS"
 	SOA   QuestionType = "SOA"
 	PTR   QuestionType = "PTR"
-	ANY	  QuestionType = "ANY"
+	ANY   QuestionType = "ANY"
 	CNAME QuestionType = "CNAME"
 )
 

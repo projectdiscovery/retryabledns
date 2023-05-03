@@ -529,7 +529,7 @@ type DNSData struct {
 	CNAME          []string   `json:"cname,omitempty"`
 	MX             []string   `json:"mx,omitempty"`
 	PTR            []string   `json:"ptr,omitempty"`
-	ANY			   []string   `json:"any,omitempty"`
+	ANY            []string   `json:"any,omitempty"`
 	SOA            []string   `json:"soa,omitempty"`
 	NS             []string   `json:"ns,omitempty"`
 	TXT            []string   `json:"txt,omitempty"`
