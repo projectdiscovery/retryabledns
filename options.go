@@ -16,5 +16,9 @@ func (options *Options) Validate() error {
 	if options.MaxRetries == 0 {
 		return errors.New("retries must be at least 1")
 	}
+
+	if len(options.BaseResolvers) == 0 {
+		return errors.New("resolvers list must not be empty")
+	}
 	return nil
 }
