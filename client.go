@@ -530,7 +530,7 @@ type DNSData struct {
 	MX             []string   `json:"mx,omitempty"`
 	PTR            []string   `json:"ptr,omitempty"`
 	ANY            []string   `json:"any,omitempty"`
-	SOA            SOA        `json:"soa,omitempty"`
+	SOA            []SOA      `json:"soa,omitempty"`
 	NS             []string   `json:"ns,omitempty"`
 	TXT            []string   `json:"txt,omitempty"`
 	SRV            []string   `json:"srv,omitempty"`
@@ -578,14 +578,14 @@ func (d *DNSData) ParseFromRR(rrs []dns.RR) error {
 		case *dns.CNAME:
 			d.CNAME = append(d.CNAME, trimChars(recordType.Target))
 		case *dns.SOA:
-			d.SOA = SOA{
+			d.SOA = append(d.SOA, SOA{
 				Name:    recordType.Hdr.Name,
 				Serial:  recordType.Serial,
 				Refresh: recordType.Refresh,
 				Retry:   recordType.Retry,
 				Expire:  recordType.Expire,
 				Minttl:  recordType.Minttl,
-			}
+			})
 		case *dns.PTR:
 			d.PTR = append(d.PTR, trimChars(recordType.Ptr))
 		case *dns.MX:
@@ -629,7 +629,7 @@ func (d *DNSData) ParseFromEnvelopeChan(envChan chan *dns.Envelope) error {
 }
 
 func (d *DNSData) contains() bool {
-	return len(d.A) > 0 || len(d.AAAA) > 0 || len(d.CNAME) > 0 || len(d.MX) > 0 || len(d.NS) > 0 || len(d.PTR) > 0 || len(d.ANY) > 0 || len(d.TXT) > 0 || len(d.SRV) > 0 || d.SOA.Name != "" || len(d.CAA) > 0
+	return len(d.A) > 0 || len(d.AAAA) > 0 || len(d.CNAME) > 0 || len(d.MX) > 0 || len(d.NS) > 0 || len(d.PTR) > 0 || len(d.ANY) > 0 || len(d.TXT) > 0 || len(d.SRV) > 0 || len(d.SOA) > 0 || len(d.CAA) > 0
 }
 
 // JSON returns the object as json string

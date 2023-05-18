@@ -66,12 +66,18 @@ func TestDOT(t *testing.T) {
 func TestQueryMultiple(t *testing.T) {
 	client, _ := New([]string{"8.8.8.8:53", "1.1.1.1:53"}, 5)
 
-	d, err := client.QueryMultiple("example.com", []uint16{dns.TypeA, dns.TypeAAAA})
+	// Test various query types
+	d, err := client.QueryMultiple("scanme.sh", []uint16{
+		dns.TypeA,
+		dns.TypeAAAA,
+		dns.TypeSOA,
+	})
 	require.Nil(t, err)
 
 	// From current dig result
 	require.True(t, len(d.A) > 0)
 	require.True(t, len(d.AAAA) > 0)
+	require.True(t, len(d.SOA) > 0)
 	require.NotZero(t, d.TTL)
 }
 
