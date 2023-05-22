@@ -530,7 +530,7 @@ type DNSData struct {
 	MX             []string   `json:"mx,omitempty"`
 	PTR            []string   `json:"ptr,omitempty"`
 	ANY            []string   `json:"any,omitempty"`
-	SOA            []string   `json:"soa,omitempty"`
+	SOA            []SOA      `json:"soa,omitempty"`
 	NS             []string   `json:"ns,omitempty"`
 	TXT            []string   `json:"txt,omitempty"`
 	SRV            []string   `json:"srv,omitempty"`
@@ -546,6 +546,15 @@ type DNSData struct {
 	RawResp        *dns.Msg   `json:"raw_resp,omitempty"`
 	Timestamp      time.Time  `json:"timestamp,omitempty"`
 	HostsFile      bool       `json:"hosts_file,omitempty"`
+}
+
+type SOA struct {
+	Name    string `json:"name,omitempty"`
+	Serial  uint32 `json:"serial,omitempty"`
+	Refresh uint32 `json:"refresh,omitempty"`
+	Retry   uint32 `json:"retry,omitempty"`
+	Expire  uint32 `json:"expire,omitempty"`
+	Minttl  uint32 `json:"minttl,omitempty"`
 }
 
 // CheckInternalIPs when set to true returns if DNS response IPs
@@ -569,8 +578,14 @@ func (d *DNSData) ParseFromRR(rrs []dns.RR) error {
 		case *dns.CNAME:
 			d.CNAME = append(d.CNAME, trimChars(recordType.Target))
 		case *dns.SOA:
-			d.SOA = append(d.SOA, trimChars(recordType.Ns))
-			d.SOA = append(d.SOA, trimChars(recordType.Mbox))
+			d.SOA = append(d.SOA, SOA{
+				Name:    recordType.Hdr.Name,
+				Serial:  recordType.Serial,
+				Refresh: recordType.Refresh,
+				Retry:   recordType.Retry,
+				Expire:  recordType.Expire,
+				Minttl:  recordType.Minttl,
+			})
 		case *dns.PTR:
 			d.PTR = append(d.PTR, trimChars(recordType.Ptr))
 		case *dns.MX:
@@ -635,7 +650,6 @@ func (d *DNSData) dedupe() {
 	d.MX = sliceutil.Dedupe(d.MX)
 	d.PTR = sliceutil.Dedupe(d.PTR)
 	d.ANY = sliceutil.Dedupe(d.ANY)
-	d.SOA = sliceutil.Dedupe(d.SOA)
 	d.NS = sliceutil.Dedupe(d.NS)
 	d.TXT = sliceutil.Dedupe(d.TXT)
 	d.SRV = sliceutil.Dedupe(d.SRV)
