@@ -9,9 +9,11 @@ import (
 )
 
 var (
-	ErrMaxRetriesZero  = errors.New("retries must be at least 1")
-	ErrResolversEmpty  = errors.New("resolvers list must not be empty")
-	ErrInvalidProtocol = errors.New("invalid protocol for local addr")
+	ErrMaxRetriesZero            = errors.New("retries must be at least 1")
+	ErrResolversEmpty            = errors.New("resolvers list must not be empty")
+	ErrInvalidProtocol           = errors.New("invalid protocol for local addr")
+	ErrInvalidInterface          = errors.New("interface with name does not exist")
+	ErrNoInterfaceAddressesFound = errors.New("interface has no available addresses to use")
 )
 
 type Options struct {
@@ -39,12 +41,41 @@ func (options *Options) GetLocalAddr(proto Protocol) net.Addr {
 	return ipAddr
 }
 
+// Sets the ip from a string, if invalid sets as nil
 func (options *Options) SetLocalAddrIP(ip string) {
 	ipStr := strings.TrimSpace(ip)
 	if ipStr == "" {
 		options.LocalAddrIP = nil
 	}
 	options.LocalAddrIP = net.ParseIP(ipStr)
+}
+
+// Sets the first available IP from a network interface name e.g. eth0
+func (options *Options) SetLocalAddrIPFromNetInterface(ifaceName string) error {
+	if iface, err := net.InterfaceByName(ifaceName); iface != nil {
+		if addrs, err := iface.Addrs(); len(addrs) > 0 {
+			var foundAddr net.IP
+		AddrLoop:
+			// Loop through to find a valid address
+			for _, addr := range addrs {
+				addr := addr.(*net.IPNet)
+				foundAddr = addr.IP
+				break AddrLoop
+			}
+			if foundAddr != nil {
+				options.LocalAddrIP = foundAddr
+			} else {
+				return ErrNoInterfaceAddressesFound
+			}
+		} else if len(addrs) == 0 {
+			return ErrNoInterfaceAddressesFound
+		} else if err != nil {
+			return err
+		}
+	} else if err != nil {
+		return ErrInvalidInterface
+	}
+	return nil
 }
 
 func (options *Options) Validate() error {

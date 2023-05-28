@@ -38,7 +38,8 @@ func TestDialerLocalAddr(t *testing.T) {
 	// 	BaseResolvers: []string{"1.1.1.1:53", "udp:8.8.8.8"},
 	// 	MaxRetries:    3,
 	// }
-	// options.SetLocalAddrIP("<YOUR_VALID_LOCAL_IP>")
+	// err = options.SetLocalAddrIPFromNetInterface("en0")
+	// require.Nil(t, err)
 	// err = options.Validate()
 	// require.Nil(t, err)
 	// client, _ = NewWithOptions(options)
