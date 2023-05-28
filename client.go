@@ -66,14 +66,32 @@ func NewWithOptions(options Options) (*Client, error) {
 	client := Client{
 		options:   options,
 		resolvers: parsedBaseResolvers,
-		udpClient: &dns.Client{Net: "", Timeout: options.Timeout},
-		tcpClient: &dns.Client{Net: TCP.String(), Timeout: options.Timeout},
+		udpClient: &dns.Client{
+			Net:     "",
+			Timeout: options.Timeout,
+			Dialer: &net.Dialer{
+				LocalAddr: options.LocalAddr,
+			},
+		},
+		tcpClient: &dns.Client{
+			Net:     TCP.String(),
+			Timeout: options.Timeout,
+			Dialer: &net.Dialer{
+				LocalAddr: options.LocalAddr,
+			},
+		},
 		dohClient: doh.NewWithOptions(
 			doh.Options{
 				HttpClient: retryablehttp.NewClient(httpOptions),
 			},
 		),
-		dotClient:  &dns.Client{Net: "tcp-tls", Timeout: options.Timeout},
+		dotClient: &dns.Client{
+			Net:     "tcp-tls",
+			Timeout: options.Timeout,
+			Dialer: &net.Dialer{
+				LocalAddr: options.LocalAddr,
+			},
+		},
 		knownHosts: knownHosts,
 	}
 	return &client, nil

@@ -2,6 +2,7 @@ package retryabledns
 
 import (
 	"errors"
+	"net"
 	"time"
 )
 
@@ -15,6 +16,7 @@ type Options struct {
 	MaxRetries    int
 	Timeout       time.Duration
 	Hostsfile     bool
+	LocalAddr     net.Addr
 }
 
 func (options *Options) Validate() error {
