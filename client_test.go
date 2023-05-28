@@ -7,6 +7,47 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestDialerLocalAddr(t *testing.T) {
+	/** Works without LocalAddrIP **/
+	options := Options{
+		BaseResolvers: []string{"1.1.1.1:53", "udp:8.8.8.8"},
+		MaxRetries:    3,
+	}
+	err := options.Validate()
+	require.Nil(t, err)
+	client, _ := NewWithOptions(options)
+	d, err := client.QueryMultiple("example.com", []uint16{dns.TypeA})
+	require.Nil(t, err)
+	// From current dig result
+	require.True(t, len(d.A) > 0)
+
+	/** Errors with invalid LocalAddrIP **/
+	options = Options{
+		BaseResolvers: []string{"1.1.1.1:53", "udp:8.8.8.8"},
+		MaxRetries:    3,
+	}
+	options.SetLocalAddrIP("1.2.3.4")
+	err = options.Validate()
+	require.Nil(t, err)
+	client, _ = NewWithOptions(options)
+	_, err = client.QueryMultiple("example.com", []uint16{dns.TypeA})
+	require.NotNil(t, err)
+
+	/** Does not error with valid Local IP **/
+	// options = Options{
+	// 	BaseResolvers: []string{"1.1.1.1:53", "udp:8.8.8.8"},
+	// 	MaxRetries:    3,
+	// }
+	// options.SetLocalAddrIP("<YOUR_VALID_LOCAL_IP>")
+	// err = options.Validate()
+	// require.Nil(t, err)
+	// client, _ = NewWithOptions(options)
+	// _, err = client.QueryMultiple("example.com", []uint16{dns.TypeA})
+	// require.Nil(t, err)
+	// // From current dig result
+	// require.True(t, len(d.A) > 0)
+}
+
 func TestConsistentResolve(t *testing.T) {
 	client, _ := New([]string{"8.8.8.8:53", "1.1.1.1:53"}, 5)
 

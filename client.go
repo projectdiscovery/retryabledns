@@ -70,14 +70,14 @@ func NewWithOptions(options Options) (*Client, error) {
 			Net:     "",
 			Timeout: options.Timeout,
 			Dialer: &net.Dialer{
-				LocalAddr: options.LocalAddr,
+				LocalAddr: options.GetLocalAddr(UDP),
 			},
 		},
 		tcpClient: &dns.Client{
 			Net:     TCP.String(),
 			Timeout: options.Timeout,
 			Dialer: &net.Dialer{
-				LocalAddr: options.LocalAddr,
+				LocalAddr: options.GetLocalAddr(TCP),
 			},
 		},
 		dohClient: doh.NewWithOptions(
@@ -89,7 +89,7 @@ func NewWithOptions(options Options) (*Client, error) {
 			Net:     "tcp-tls",
 			Timeout: options.Timeout,
 			Dialer: &net.Dialer{
-				LocalAddr: options.LocalAddr,
+				LocalAddr: options.GetLocalAddr(TCP),
 			},
 		},
 		knownHosts: knownHosts,
