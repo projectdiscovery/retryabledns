@@ -4,16 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strings"
 	"time"
 )
 
 var (
-	ErrMaxRetriesZero            = errors.New("retries must be at least 1")
-	ErrResolversEmpty            = errors.New("resolvers list must not be empty")
-	ErrInvalidProtocol           = errors.New("invalid protocol for local addr")
-	ErrInvalidInterface          = errors.New("interface with name does not exist")
-	ErrNoInterfaceAddressesFound = errors.New("interface has no available addresses to use")
+	ErrMaxRetriesZero = errors.New("retries must be at least 1")
+	ErrResolversEmpty = errors.New("resolvers list must not be empty")
 )
 
 type Options struct {
@@ -30,7 +26,7 @@ func (options *Options) GetLocalAddr(proto Protocol) net.Addr {
 	if options.LocalAddrIP == nil {
 		return nil
 	}
-	ipPort := fmt.Sprintf("%s:%d", options.LocalAddrIP, options.LocalAddrPort)
+	ipPort := net.JoinHostPort(options.LocalAddrIP.String(), fmt.Sprint(options.LocalAddrPort))
 	var ipAddr net.Addr
 	switch proto {
 	case UDP:
@@ -43,39 +39,29 @@ func (options *Options) GetLocalAddr(proto Protocol) net.Addr {
 
 // Sets the ip from a string, if invalid sets as nil
 func (options *Options) SetLocalAddrIP(ip string) {
-	ipStr := strings.TrimSpace(ip)
-	if ipStr == "" {
-		options.LocalAddrIP = nil
-	}
-	options.LocalAddrIP = net.ParseIP(ipStr)
+	// invalid ips are no-ops
+	options.LocalAddrIP = net.ParseIP(ip)
 }
 
 // Sets the first available IP from a network interface name e.g. eth0
 func (options *Options) SetLocalAddrIPFromNetInterface(ifaceName string) error {
-	if iface, err := net.InterfaceByName(ifaceName); iface != nil {
-		if addrs, err := iface.Addrs(); len(addrs) > 0 {
-			var foundAddr net.IP
-		AddrLoop:
-			// Loop through to find a valid address
-			for _, addr := range addrs {
-				addr := addr.(*net.IPNet)
-				foundAddr = addr.IP
-				break AddrLoop
-			}
-			if foundAddr != nil {
-				options.LocalAddrIP = foundAddr
-			} else {
-				return ErrNoInterfaceAddressesFound
-			}
-		} else if len(addrs) == 0 {
-			return ErrNoInterfaceAddressesFound
-		} else if err != nil {
-			return err
-		}
-	} else if err != nil {
-		return ErrInvalidInterface
+	iface, err := net.InterfaceByName(ifaceName)
+	if err != nil {
+		return err
 	}
-	return nil
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return err
+	}
+	for _, addr := range addrs {
+		ipnetAddr, ok := addr.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		options.LocalAddrIP = ipnetAddr.IP
+		return nil
+	}
+	return errors.New("no ip address found for interface")
 }
 
 func (options *Options) Validate() error {
