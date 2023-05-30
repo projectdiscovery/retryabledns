@@ -1,8 +1,10 @@
 package retryabledns
 
 import (
+	"net"
 	"testing"
 
+	stringsutil "github.com/projectdiscovery/utils/strings"
 	"github.com/stretchr/testify/require"
 )
 
@@ -10,12 +12,19 @@ func TestSetLocalAddrIPFromNetInterface(t *testing.T) {
 	options := Options{
 		MaxRetries: 0,
 	}
-	err := options.SetLocalAddrIPFromNetInterface("lo0")
+	// search loopback interface
+	interfaces, err := net.Interfaces()
 	require.Nil(t, err)
-	require.NotNil(t, options.LocalAddrIP)
-	require.Equal(t, "127.0.0.1", options.LocalAddrIP.String())
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagLoopback != 0 {
+			err := options.SetLocalAddrIPFromNetInterface(iface.Name)
+			require.Nil(t, err)
+			require.NotNil(t, options.LocalAddrIP)
+			require.True(t, stringsutil.EqualFoldAny(options.LocalAddrIP.String(), "127.0.0.1", "::1"))
+		}
+	}
 
-	/** Should error with invalid interface name **/
+	// Should error with invalid interface name
 	err = options.SetLocalAddrIPFromNetInterface("lo1234")
 	require.NotNil(t, err)
 }
