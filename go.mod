@@ -5,7 +5,7 @@ go 1.18
 require (
 	github.com/miekg/dns v1.1.54
 	github.com/projectdiscovery/retryablehttp-go v1.0.17
-	github.com/stretchr/testify v1.8.3
+	github.com/stretchr/testify v1.8.4
 )
 
 require (
