@@ -289,6 +289,11 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 			}
 			msg.Question[0] = question
 		}
+		// If the request type is dns.TypeANY, set the 'AnyQuery' flag in dnsdata to true.
+		// This indicates that the dnsdata supports storing DNSDATA.ANY queries and the associated responses.
+		if requestType == dns.TypeANY {
+			dnsdata.AnyQuery = true
+		}
 
 		var (
 			resp        *dns.Msg
@@ -564,10 +569,12 @@ type DNSData struct {
 	RawResp        *dns.Msg   `json:"raw_resp,omitempty"`
 	Timestamp      time.Time  `json:"timestamp,omitempty"`
 	HostsFile      bool       `json:"hosts_file,omitempty"`
+	AnyQuery       bool       `json:"-"`
 }
 
 type SOA struct {
-	Name    string `json:"name,omitempty"`
+	NS      string `json:"ns,omitempty"`
+	Mbox    string `json:"mailbox,omitempty"`
 	Serial  uint32 `json:"serial,omitempty"`
 	Refresh uint32 `json:"refresh,omitempty"`
 	Retry   uint32 `json:"retry,omitempty"`
@@ -597,13 +604,15 @@ func (d *DNSData) ParseFromRR(rrs []dns.RR) error {
 			d.CNAME = append(d.CNAME, trimChars(recordType.Target))
 		case *dns.SOA:
 			d.SOA = append(d.SOA, SOA{
-				Name:    recordType.Hdr.Name,
+				NS:      recordType.Ns,
+				Mbox:    recordType.Mbox,
 				Serial:  recordType.Serial,
 				Refresh: recordType.Refresh,
 				Retry:   recordType.Retry,
 				Expire:  recordType.Expire,
 				Minttl:  recordType.Minttl,
-			})
+			},
+			)
 		case *dns.PTR:
 			d.PTR = append(d.PTR, trimChars(recordType.Ptr))
 		case *dns.MX:
@@ -624,6 +633,9 @@ func (d *DNSData) ParseFromRR(rrs []dns.RR) error {
 			d.AAAA = append(d.AAAA, trimChars(recordType.AAAA.String()))
 		}
 		d.AllRecords = append(d.AllRecords, record.String())
+	}
+	if d.AnyQuery {
+		d.ANY = sliceutil.Merge(d.A, d.NS, d.AAAA, d.SRV, d.TXT, d.CAA, d.MX, d.PTR, d.CNAME, d.GetSOARecords())
 	}
 	return nil
 }
@@ -701,4 +713,13 @@ type TraceData struct {
 type AXFRData struct {
 	Host    string     `json:"host,omitempty"`
 	DNSData []*DNSData `json:"chain,omitempty"`
+}
+
+// GetSOARecords returns the NS and Mbox of all SOA records as a string slice
+func (d *DNSData) GetSOARecords() []string {
+	var soaRecords []string
+	for _, soa := range d.SOA {
+		soaRecords = append(soaRecords, soa.NS, soa.Mbox)
+	}
+	return soaRecords
 }
