@@ -635,10 +635,7 @@ func (d *DNSData) ParseFromRR(rrs []dns.RR) error {
 		d.AllRecords = append(d.AllRecords, record.String())
 	}
 	if d.AnyQuery {
-		d.ANY = sliceutil.Merge(d.A, d.NS, d.AAAA, d.SRV, d.TXT, d.CAA, d.MX, d.PTR, d.CNAME)
-		for _, r := range d.SOA {
-			d.ANY = append(d.ANY, r.NS, r.Mbox)
-		}
+		d.ANY = sliceutil.Merge(d.A, d.NS, d.AAAA, d.SRV, d.TXT, d.CAA, d.MX, d.PTR, d.CNAME, d.GetSOARecords())
 	}
 	return nil
 }
@@ -716,4 +713,13 @@ type TraceData struct {
 type AXFRData struct {
 	Host    string     `json:"host,omitempty"`
 	DNSData []*DNSData `json:"chain,omitempty"`
+}
+
+// GetSOARecords returns the NS and Mbox of all SOA records as a string slice
+func (d *DNSData) GetSOARecords() []string {
+	var soaRecords []string
+	for _, soa := range d.SOA {
+		soaRecords = append(soaRecords, soa.NS, soa.Mbox)
+	}
+	return soaRecords
 }
