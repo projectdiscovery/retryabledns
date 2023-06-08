@@ -604,8 +604,8 @@ func (d *DNSData) ParseFromRR(rrs []dns.RR) error {
 			d.CNAME = append(d.CNAME, trimChars(recordType.Target))
 		case *dns.SOA:
 			d.SOA = append(d.SOA, SOA{
-				NS:      recordType.Ns,
-				Mbox:    recordType.Mbox,
+				NS:      trimChars(recordType.Ns),
+				Mbox:    trimChars(recordType.Mbox),
 				Serial:  recordType.Serial,
 				Refresh: recordType.Refresh,
 				Retry:   recordType.Retry,
