@@ -239,8 +239,9 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 // QueryMultiple sends a provided dns request and return the data
 func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Resolver) (*DNSData, error) {
 	var (
-		dnsdata DNSData
-		err     error
+		hasResolver bool = resolver != nil
+		dnsdata     DNSData
+		err         error
 	)
 
 	// integrate data with known hosts in case
@@ -289,16 +290,10 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 			}
 			msg.Question[0] = question
 		}
-		// If the request type is dns.TypeANY, set the 'AnyQuery' flag in dnsdata to true.
-		// This indicates that the dnsdata supports storing DNSDATA.ANY queries and the associated responses.
-		if requestType == dns.TypeANY {
-			dnsdata.AnyQuery = true
-		}
 
 		var (
-			resp        *dns.Msg
-			trResp      chan *dns.Envelope
-			hasResolver bool = resolver != nil
+			resp   *dns.Msg
+			trResp chan *dns.Envelope
 		)
 		for i := 0; i < c.options.MaxRetries; i++ {
 			index := atomic.AddUint32(&c.serversIndex, 1)
@@ -552,7 +547,6 @@ type DNSData struct {
 	CNAME          []string   `json:"cname,omitempty"`
 	MX             []string   `json:"mx,omitempty"`
 	PTR            []string   `json:"ptr,omitempty"`
-	ANY            []string   `json:"any,omitempty"`
 	SOA            []SOA      `json:"soa,omitempty"`
 	NS             []string   `json:"ns,omitempty"`
 	TXT            []string   `json:"txt,omitempty"`
@@ -569,7 +563,6 @@ type DNSData struct {
 	RawResp        *dns.Msg   `json:"raw_resp,omitempty"`
 	Timestamp      time.Time  `json:"timestamp,omitempty"`
 	HostsFile      bool       `json:"hosts_file,omitempty"`
-	AnyQuery       bool       `json:"-"`
 }
 
 type SOA struct {
@@ -634,9 +627,6 @@ func (d *DNSData) ParseFromRR(rrs []dns.RR) error {
 		}
 		d.AllRecords = append(d.AllRecords, record.String())
 	}
-	if d.AnyQuery {
-		d.ANY = sliceutil.Merge(d.A, d.NS, d.AAAA, d.SRV, d.TXT, d.CAA, d.MX, d.PTR, d.CNAME, d.GetSOARecords())
-	}
 	return nil
 }
 
@@ -659,7 +649,7 @@ func (d *DNSData) ParseFromEnvelopeChan(envChan chan *dns.Envelope) error {
 }
 
 func (d *DNSData) contains() bool {
-	return len(d.A) > 0 || len(d.AAAA) > 0 || len(d.CNAME) > 0 || len(d.MX) > 0 || len(d.NS) > 0 || len(d.PTR) > 0 || len(d.ANY) > 0 || len(d.TXT) > 0 || len(d.SRV) > 0 || len(d.SOA) > 0 || len(d.CAA) > 0
+	return len(d.A) > 0 || len(d.AAAA) > 0 || len(d.CNAME) > 0 || len(d.MX) > 0 || len(d.NS) > 0 || len(d.PTR) > 0 || len(d.TXT) > 0 || len(d.SRV) > 0 || len(d.SOA) > 0 || len(d.CAA) > 0
 }
 
 // JSON returns the object as json string
@@ -679,7 +669,6 @@ func (d *DNSData) dedupe() {
 	d.CNAME = sliceutil.Dedupe(d.CNAME)
 	d.MX = sliceutil.Dedupe(d.MX)
 	d.PTR = sliceutil.Dedupe(d.PTR)
-	d.ANY = sliceutil.Dedupe(d.ANY)
 	d.NS = sliceutil.Dedupe(d.NS)
 	d.TXT = sliceutil.Dedupe(d.TXT)
 	d.SRV = sliceutil.Dedupe(d.SRV)
