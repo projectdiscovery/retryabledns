@@ -16,7 +16,6 @@ import (
 	"github.com/miekg/dns"
 	"github.com/projectdiscovery/retryabledns/doh"
 	"github.com/projectdiscovery/retryabledns/hostsfile"
-	"github.com/projectdiscovery/retryablehttp-go"
 	iputil "github.com/projectdiscovery/utils/ip"
 	sliceutil "github.com/projectdiscovery/utils/slice"
 )
@@ -61,8 +60,9 @@ func NewWithOptions(options Options) (*Client, error) {
 	if options.Hostsfile {
 		knownHosts, _ = hostsfile.ParseDefault()
 	}
-	httpOptions := retryablehttp.DefaultOptionsSingle
-	httpOptions.Timeout = options.Timeout
+
+	httpClient := doh.NewHttpClientWithTimeout(options.Timeout)
+
 	client := Client{
 		options:   options,
 		resolvers: parsedBaseResolvers,
@@ -82,7 +82,7 @@ func NewWithOptions(options Options) (*Client, error) {
 		},
 		dohClient: doh.NewWithOptions(
 			doh.Options{
-				HttpClient: retryablehttp.NewClient(httpOptions),
+				HttpClient: httpClient,
 			},
 		),
 		dotClient: &dns.Client{
