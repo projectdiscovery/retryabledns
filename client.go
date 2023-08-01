@@ -113,7 +113,7 @@ func NewWithOptions(options Options) (*Client, error) {
 			if err != nil {
 				return nil, err
 			}
-			client.udpConnPool.Set(resolver.String(), udpConnPool)
+			_ = client.udpConnPool.Set(resolver.String(), udpConnPool)
 		}
 	}
 	return &client, nil
@@ -572,7 +572,7 @@ func (c *Client) axfr(host string) (*AXFRData, error) {
 }
 
 func (c *Client) Close() {
-	c.udpConnPool.Iterate(func(_ string, connPool *ConnPool) error {
+	_ = c.udpConnPool.Iterate(func(_ string, connPool *ConnPool) error {
 		connPool.Close()
 		return nil
 	})
