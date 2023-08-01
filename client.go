@@ -2,6 +2,7 @@ package retryabledns
 
 import (
 	"bytes"
+	"context"
 	"encoding/gob"
 	"encoding/json"
 	"errors"
@@ -17,14 +18,13 @@ import (
 	"github.com/projectdiscovery/retryabledns/doh"
 	"github.com/projectdiscovery/retryabledns/hostsfile"
 	iputil "github.com/projectdiscovery/utils/ip"
+	mapsutil "github.com/projectdiscovery/utils/maps"
 	sliceutil "github.com/projectdiscovery/utils/slice"
 )
 
 var internalRangeCheckerInstance *internalRangeChecker
 
 func init() {
-	rand.Seed(time.Now().UnixNano())
-
 	var err error
 	internalRangeCheckerInstance, err = newInternalRangeChecker()
 	if err != nil {
@@ -39,6 +39,7 @@ type Client struct {
 	serversIndex uint32
 	TCPFallback  bool
 	udpClient    *dns.Client
+	udpConnPool  mapsutil.SyncLockMap[string, *ConnPool]
 	tcpClient    *dns.Client
 	dohClient    *doh.Client
 	dotClient    *dns.Client
@@ -94,6 +95,27 @@ func NewWithOptions(options Options) (*Client, error) {
 		},
 		knownHosts: knownHosts,
 	}
+	if options.ConnectionPoolThreads > 1 {
+		client.udpConnPool = mapsutil.SyncLockMap[string, *ConnPool]{
+			Map: make(mapsutil.Map[string, *ConnPool]),
+		}
+		for _, resolver := range client.resolvers {
+			resolverHost, resolverPort, err := net.SplitHostPort(resolver.String())
+			if err != nil {
+				return nil, err
+			}
+			networkResolver := NetworkResolver{
+				Protocol: UDP,
+				Port:     resolverPort,
+				Host:     resolverHost,
+			}
+			udpConnPool, err := NewConnPool(networkResolver, options.ConnectionPoolThreads)
+			if err != nil {
+				return nil, err
+			}
+			client.udpConnPool.Set(resolver.String(), udpConnPool)
+		}
+	}
 	return &client, nil
 }
 
@@ -136,7 +158,13 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 			case TCP:
 				resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
 			case UDP:
-				resp, _, err = c.udpClient.Exchange(msg, resolver.String())
+				if c.options.ConnectionPoolThreads > 1 {
+					if udpConnPool, ok := c.udpConnPool.Get(resolver.String()); ok {
+						resp, _, err = udpConnPool.Exchange(context.TODO(), c.udpClient, msg)
+					}
+				} else {
+					resp, _, err = c.udpClient.Exchange(msg, resolver.String())
+				}
 			case DOT:
 				resp, _, err = c.dotClient.Exchange(msg, resolver.String())
 			}
@@ -325,7 +353,13 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 					case TCP:
 						resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
 					case UDP:
-						resp, _, err = c.udpClient.Exchange(msg, resolver.String())
+						if c.options.ConnectionPoolThreads > 1 {
+							if udpConnPool, ok := c.udpConnPool.Get(resolver.String()); ok {
+								resp, _, err = udpConnPool.Exchange(context.TODO(), c.udpClient, msg)
+							}
+						} else {
+							resp, _, err = c.udpClient.Exchange(msg, resolver.String())
+						}
 					case DOT:
 						resp, _, err = c.dotClient.Exchange(msg, resolver.String())
 					}
@@ -535,6 +569,13 @@ func (c *Client) axfr(host string) (*AXFRData, error) {
 	}
 
 	return &AXFRData{Host: host, DNSData: data}, nil
+}
+
+func (c *Client) Close() {
+	c.udpConnPool.Iterate(func(_ string, connPool *ConnPool) error {
+		connPool.Close()
+		return nil
+	})
 }
 
 // DNSData is the data for a DNS request response

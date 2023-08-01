@@ -13,12 +13,13 @@ var (
 )
 
 type Options struct {
-	BaseResolvers []string
-	MaxRetries    int
-	Timeout       time.Duration
-	Hostsfile     bool
-	LocalAddrIP   net.IP
-	LocalAddrPort uint16
+	BaseResolvers         []string
+	MaxRetries            int
+	Timeout               time.Duration
+	Hostsfile             bool
+	LocalAddrIP           net.IP
+	LocalAddrPort         uint16
+	ConnectionPoolThreads int
 }
 
 // Returns a net.Addr of a UDP or TCP type depending on whats required

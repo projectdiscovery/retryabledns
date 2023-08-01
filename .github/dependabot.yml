@@ -9,6 +9,7 @@ updates:
   # Maintain dependencies for GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "main"
     schedule:
       interval: "weekly"
     commit-message:
@@ -17,6 +18,7 @@ updates:
 
   # Maintain dependencies for go modules
   - package-ecosystem: "gomod"
+    target-branch: "main"
     directory: "/"
     schedule:
       interval: "weekly"
@@ -26,6 +28,7 @@ updates:
 
   # Maintain dependencies for docker
   - package-ecosystem: "docker"
+    target-branch: "main"
     directory: "/"
     schedule:
       interval: "weekly"
