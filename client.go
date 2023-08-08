@@ -17,6 +17,7 @@ import (
 	"github.com/projectdiscovery/retryabledns/doh"
 	"github.com/projectdiscovery/retryabledns/hostsfile"
 	iputil "github.com/projectdiscovery/utils/ip"
+	"github.com/projectdiscovery/utils/ptr"
 	sliceutil "github.com/projectdiscovery/utils/slice"
 )
 
@@ -566,6 +567,7 @@ type DNSData struct {
 }
 
 type SOA struct {
+	Name    string `json:"name,omitempty"`
 	NS      string `json:"ns,omitempty"`
 	Mbox    string `json:"mailbox,omitempty"`
 	Serial  uint32 `json:"serial,omitempty"`
@@ -597,6 +599,7 @@ func (d *DNSData) ParseFromRR(rrs []dns.RR) error {
 			d.CNAME = append(d.CNAME, trimChars(recordType.Target))
 		case *dns.SOA:
 			d.SOA = append(d.SOA, SOA{
+				Name:    ptr.Safe(&recordType.Hdr).Name,
 				NS:      trimChars(recordType.Ns),
 				Mbox:    trimChars(recordType.Mbox),
 				Serial:  recordType.Serial,
