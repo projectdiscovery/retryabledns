@@ -1,13 +1,16 @@
 module github.com/projectdiscovery/retryabledns
 
-go 1.18
+go 1.20
 
 require (
 	github.com/miekg/dns v1.1.55
 	github.com/stretchr/testify v1.8.4
 )
 
-require github.com/projectdiscovery/blackrock v0.0.1 // indirect
+require (
+	github.com/projectdiscovery/blackrock v0.0.1 // indirect
+	golang.org/x/exp v0.0.0-20221019170559-20944726eadf // indirect
+)
 
 require (
 	github.com/asaskevich/govalidator v0.0.0-20210307081110-f21760c49a8d // indirect
