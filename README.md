@@ -15,6 +15,14 @@ $ go get github.com/projectdiscovery/retryabledns
 
 After this command *retryabledns* library source will be in your $GOPATH
 
+## `/etc/hosts` file processing
+By default, the library processes the `/etc/hosts` file up to a maximum of 500 lines for efficiency. If your setup has a larger hosts file and you want to process more lines, you can easily configure this limit by adjusting the `hostsfile.MaxLines` variable.
+
+For example:
+``` go
+hostsfile.MaxLines = 1000  // Now the library will process up to 1000 lines from the hosts file
+```
+
 ## Example
 Usage Example:
 
