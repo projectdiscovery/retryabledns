@@ -12,13 +12,12 @@ import (
 )
 
 const (
-	localhostName   = "localhost"
-	defaultMaxLines = 500
+	localhostName = "localhost"
 )
 
 var (
 	// MaxLines defines the maximum number of lines the Parse function will process from the hosts file.
-	MaxLines = defaultMaxLines
+	MaxLines = 4096
 )
 
 func Path() string {
