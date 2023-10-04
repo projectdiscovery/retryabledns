@@ -1,7 +1,9 @@
 # Retryable dns resolver
+
 Based on `miekg/dns` and freely inspired by `bogdanovich/dns_resolver`.
 
 ## Features
+
 - Supports system default resolvers along with user supplied ones
 - Retries dns requests in case of I/O, Time, Network failures
 - Allows arbitrary query types
@@ -9,13 +11,24 @@ Based on `miekg/dns` and freely inspired by `bogdanovich/dns_resolver`.
 
 ### Using *go get*
 
-```
+```console
 $ go get github.com/projectdiscovery/retryabledns
 ```
 
 After this command *retryabledns* library source will be in your $GOPATH
 
+## `/etc/hosts` file processing
+
+By default, the library processes the `/etc/hosts` file up to a maximum amount of lines for efficiency (4096). If your setup has a larger hosts file and you want to process more lines, you can easily configure this limit by adjusting the `hostsfile.MaxLines` variable.
+
+For example:
+
+``` go
+hostsfile.MaxLines = 10000  // Now the library will process up to 10000 lines from the hosts file
+```
+
 ## Example
+
 Usage Example:
 
 ``` go
@@ -54,5 +67,6 @@ func main() {
 ```
 
 Credits:
-- https://github.com/lixiangzhong/dnsutil
-- https://github.com/rs/dnstrace
+
+- `https://github.com/lixiangzhong/dnsutil`
+- `https://github.com/rs/dnstrace`
