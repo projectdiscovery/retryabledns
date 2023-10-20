@@ -269,6 +269,7 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 	var (
 		hasResolver bool = resolver != nil
 		dnsdata     DNSData
+		stats       []DNSDataStats
 		err         error
 	)
 
@@ -323,11 +324,27 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 			resp   *dns.Msg
 			trResp chan *dns.Envelope
 		)
+		st := time.Now()
+
+		var stat = DNSDataStats{}
 		for i := 0; i < c.options.MaxRetries; i++ {
 			index := atomic.AddUint32(&c.serversIndex, 1)
 			if !hasResolver {
 				resolver = c.resolvers[index%uint32(len(c.resolvers))]
 			}
+
+			if i == 0 {
+				stat = DNSDataStats{
+					Resolver: resolver.String(),
+					Error:    DNSResponseErrorNoError,
+					Spent:    0,
+				}
+			} else {
+				stat.Spent = time.Now().Sub(st)
+				stats = append(stats, stat)
+				st = time.Now()
+			}
+
 			switch r := resolver.(type) {
 			case *NetworkResolver:
 				if requestType == dns.TypeAXFR {
@@ -343,15 +360,22 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 						dnsconn, err = c.tcpClient.Dial(resolver.String())
 					}
 					if err != nil {
+						stat.Error = DNSResponseErrorDialError
 						break
 					}
 					defer dnsconn.Close()
 					dnsTransfer := &dns.Transfer{Conn: dnsconn}
 					trResp, err = dnsTransfer.In(msg, resolver.String())
+					if err != nil {
+						stat.Error = DNSResponseErrorTransferIn
+					}
 				} else {
 					switch r.Protocol {
 					case TCP:
 						resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
+						if err != nil {
+							stat.Error = DNSResponseErrorTCPClientExchange
+						}
 					case UDP:
 						if c.options.ConnectionPoolThreads > 1 {
 							if udpConnPool, ok := c.udpConnPool.Get(resolver.String()); ok {
@@ -359,9 +383,16 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 							}
 						} else {
 							resp, _, err = c.udpClient.Exchange(msg, resolver.String())
+							if err != nil {
+								stat.Error = DNSResponseErrorUDPClientExchange
+							}
 						}
 					case DOT:
 						resp, _, err = c.dotClient.Exchange(msg, resolver.String())
+						if err != nil {
+							stat.Error = DNSResponseErrorDOTClientExchange
+						}
+
 					}
 				}
 			case *DohResolver:
@@ -370,6 +401,9 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 					method = doh.MethodGet
 				}
 				resp, err = c.dohClient.QueryWithDOHMsg(method, doh.Resolver{URL: r.URL}, msg)
+				if err != nil {
+					stat.Error = DNSResponseErrorQueryWithDOHMsg
+				}
 			}
 
 			if err != nil || (trResp == nil && resp == nil) {
@@ -379,6 +413,9 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 			// https://github.com/projectdiscovery/retryabledns/issues/25
 			if resp != nil && resp.Truncated && c.TCPFallback {
 				resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
+				if err != nil {
+					stat.Error = DNSResponseErrorTCPClientExchange
+				}
 				if err != nil || resp == nil {
 					continue
 				}
@@ -387,8 +424,14 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 			switch requestType {
 			case dns.TypeAXFR:
 				err = dnsdata.ParseFromEnvelopeChan(trResp)
+				if err != nil {
+					stat.Error = DNSResponseErrorParseFromEnvelopeChan
+				}
 			default:
 				err = dnsdata.ParseFromMsg(resp)
+				if err != nil {
+					stat.Error = DNSResponseErrorParseFromMsg
+				}
 			}
 
 			// populate anyway basic info
@@ -417,7 +460,13 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 				break
 			}
 		}
+
+		stat.Spent = time.Now().Sub(st)
+		stats = append(stats, stat)
+		st = time.Now()
 	}
+
+	dnsdata.Stats = stats
 
 	return &dnsdata, err
 }
@@ -604,6 +653,27 @@ type DNSData struct {
 	RawResp        *dns.Msg   `json:"raw_resp,omitempty"`
 	Timestamp      time.Time  `json:"timestamp,omitempty"`
 	HostsFile      bool       `json:"hosts_file,omitempty"`
+	Stats          []DNSDataStats
+}
+
+type DNSResponseError int
+
+const (
+	DNSResponseErrorNoError DNSResponseError = iota
+	DNSResponseErrorDialError
+	DNSResponseErrorTransferIn
+	DNSResponseErrorTCPClientExchange
+	DNSResponseErrorUDPClientExchange
+	DNSResponseErrorDOTClientExchange
+	DNSResponseErrorQueryWithDOHMsg
+	DNSResponseErrorParseFromEnvelopeChan
+	DNSResponseErrorParseFromMsg
+)
+
+type DNSDataStats struct {
+	Resolver string
+	Error    DNSResponseError
+	Spent    time.Duration
 }
 
 type SOA struct {
