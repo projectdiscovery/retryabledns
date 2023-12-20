@@ -656,9 +656,7 @@ func (d *DNSData) ParseFromRR(rrs []dns.RR) error {
 		case *dns.CAA:
 			d.CAA = append(d.CAA, trimChars(recordType.Value))
 		case *dns.TXT:
-			for _, txt := range recordType.Txt {
-				d.TXT = append(d.TXT, trimChars(txt))
-			}
+			d.TXT = append(d.TXT, strings.Join(recordType.Txt, ""))
 		case *dns.SRV:
 			d.SRV = append(d.SRV, trimChars(recordType.Target))
 		case *dns.AAAA:
