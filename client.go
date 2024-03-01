@@ -656,9 +656,9 @@ func (d *DNSData) ParseFromRR(rrs []dns.RR) error {
 		case *dns.CAA:
 			d.CAA = append(d.CAA, trimChars(recordType.Value))
 		case *dns.TXT:
-			for _, txt := range recordType.Txt {
-				d.TXT = append(d.TXT, trimChars(txt))
-			}
+			// Per RFC 7208, a single TXT record can be broken up into multiple parts and "MUST be treated as if those strings are concatenated
+			// together without adding spaces"; see: https://www.rfc-editor.org/rfc/rfc7208
+			d.TXT = append(d.TXT, strings.Join(recordType.Txt, ""))
 		case *dns.SRV:
 			d.SRV = append(d.SRV, trimChars(recordType.Target))
 		case *dns.AAAA:
