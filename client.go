@@ -391,6 +391,8 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 				err = dnsdata.ParseFromMsg(resp)
 			}
 
+			dnsdata.RawResp = resp
+			
 			// populate anyway basic info
 			dnsdata.Host = host
 			switch {
