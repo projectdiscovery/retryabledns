@@ -391,8 +391,10 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 				err = dnsdata.ParseFromMsg(resp)
 			}
 
+			// Note: this will refer only to the last valid response
+			// the whole series of responses can be found in the dnsdata.Raw field
 			dnsdata.RawResp = resp
-			
+
 			// populate anyway basic info
 			dnsdata.Host = host
 			switch {
