@@ -18,8 +18,8 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/projectdiscovery/blackrock v0.0.1 h1:lHQqhaaEFjgf5WkuItbpeCZv2DUIE45k0VbGJyft6LQ=
 github.com/projectdiscovery/blackrock v0.0.1/go.mod h1:ANUtjDfaVrqB453bzToU+YB4cUbvBRpLvEwoWIwlTss=
-github.com/projectdiscovery/utils v0.1.4 h1:VSULN/RBEXbkgWuhrDey84ZDnSXtYMSev9p+QHXXDeI=
-github.com/projectdiscovery/utils v0.1.4/go.mod h1:mXs6OOeG9l/dVchjB2PGvQO3+wuMiE14Y/kmHeKogoM=
+github.com/projectdiscovery/utils v0.1.5 h1:vjD2ZVtVEEiWNIKIFWkWSxaHnw8wGln8Lyfru6E+BW0=
+github.com/projectdiscovery/utils v0.1.5/go.mod h1:NhjK2eVeoXLIZIYBJ2Z7yl6V4sB6Xr5Bzs1GdAqvJZ4=
 github.com/saintfish/chardet v0.0.0-20230101081208-5e3ef4b5456d h1:hrujxIzL1woJ7AwssoOcM/tq5JjjG2yYOc8odClEiXA=
 github.com/saintfish/chardet v0.0.0-20230101081208-5e3ef4b5456d/go.mod h1:uugorj2VCxiV1x+LzaIdVa9b4S4qGAcH6cbhh4qVxOU=
 github.com/stretchr/testify v1.9.0 h1:HtqpIVDClZ4nwg75+f6Lvsy/wHu+3BoSGCbBAcpTsTg=
