@@ -42,11 +42,16 @@ import (
 )
 
 func main() {
-    // it requires a list of resolvers
-    resolvers := []string{"8.8.8.8:53", "8.8.4.4:53"}
+    // It requires a list of resolvers.
+    // Valid protocols are "udp", "tcp", "doh", "dot". Default are "udp".
+    resolvers := []string{"8.8.8.8:53", "8.8.4.4:53", "tcp:1.1.1.1"}
     retries := 2
     hostname := "hackerone.com"
-    dnsClient := retryabledns.New(resolvers, retries)
+
+    dnsClient, err := retryabledns.New(resolvers, retries)
+    if err != nil {
+        log.Fatal(err)
+    }
 
     ips, err := dnsClient.Resolve(hostname)
     if err != nil {
