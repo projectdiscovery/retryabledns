@@ -22,6 +22,10 @@ import (
 	sliceutil "github.com/projectdiscovery/utils/slice"
 )
 
+var (
+	DefaultMaxPerCNAMEFollows = 32
+)
+
 var internalRangeCheckerInstance *internalRangeChecker
 
 func init() {
@@ -60,6 +64,10 @@ func NewWithOptions(options Options) (*Client, error) {
 	var knownHosts map[string][]string
 	if options.Hostsfile {
 		knownHosts, _ = hostsfile.ParseDefault()
+	}
+
+	if options.MaxPerCNAMEFollows == 0 {
+		options.MaxPerCNAMEFollows = DefaultMaxPerCNAMEFollows
 	}
 
 	httpClient := doh.NewHttpClientWithTimeout(options.Timeout)
@@ -472,6 +480,7 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*Trac
 	msg.SetQuestion(host, requestType)
 	servers := RootDNSServersIPv4
 	seenNS := make(map[string]struct{})
+	seenCName := make(map[string]int)
 	for i := 1; i < maxrecursion; i++ {
 		msg.SetQuestion(host, requestType)
 		dnsdatas, err := c.QueryParallel(host, requestType, servers)
@@ -534,6 +543,10 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*Trac
 
 		// follow cname if any
 		if nextCname != "" {
+			seenCName[nextCname]++
+			if seenCName[nextCname] > c.options.MaxPerCNAMEFollows {
+				break
+			}
 			host = nextCname
 		}
 	}
