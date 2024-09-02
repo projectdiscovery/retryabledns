@@ -22,6 +22,8 @@ import (
 	sliceutil "github.com/projectdiscovery/utils/slice"
 )
 
+var ErrRetriesExceeded = errors.New("could not resolve, max retries exceeded")
+
 var internalRangeCheckerInstance *internalRangeChecker
 
 func init() {
@@ -187,7 +189,7 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 		// In case we get a non empty answer stop retrying
 		return resp, nil
 	}
-	return resp, errors.New("could not resolve, max retries exceeded")
+	return resp, ErrRetriesExceeded
 }
 
 // Query sends a provided dns request and return enriched response
@@ -322,8 +324,9 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 		var (
 			resp   *dns.Msg
 			trResp chan *dns.Envelope
+			i      int
 		)
-		for i := 0; i < c.options.MaxRetries; i++ {
+		for i = 0; i < c.options.MaxRetries; i++ {
 			index := atomic.AddUint32(&c.serversIndex, 1)
 			if !hasResolver {
 				resolver = c.resolvers[index%uint32(len(c.resolvers))]
@@ -420,6 +423,11 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 			if trResp != nil {
 				break
 			}
+		}
+		// Finished retry loop at limit, bail out
+		if i == c.options.MaxRetries {
+			err = ErrRetriesExceeded
+			break
 		}
 	}
 

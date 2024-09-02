@@ -123,6 +123,30 @@ func TestQueryMultiple(t *testing.T) {
 	require.NotZero(t, d.TTL)
 }
 
+func TestRetries(t *testing.T) {
+	client, _ := New([]string{"127.0.0.1"}, 5)
+
+	// Test that error is returned on max retries, should conn refused 5 times then err
+	_, err := client.QueryMultiple("scanme.sh", []uint16{dns.TypeA})
+	require.True(t, err == ErrRetriesExceeded)
+
+	msg := &dns.Msg{}
+	msg.Id = dns.Id()
+	msg.SetEdns0(4096, false)
+	msg.Question = make([]dns.Question, 1)
+	msg.RecursionDesired = true
+	question := dns.Question{
+		Name:   "scanme.sh",
+		Qtype:  dns.TypeA,
+		Qclass: dns.ClassINET,
+	}
+	msg.Question[0] = question
+
+	// Test with raw Do() interface as well
+	_, err = client.Do(msg)
+	require.True(t, err == ErrRetriesExceeded)
+}
+
 func TestTrace(t *testing.T) {
 	client, _ := New([]string{"8.8.8.8:53", "1.1.1.1:53"}, 5)
 
