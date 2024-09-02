@@ -4,10 +4,11 @@ Based on `miekg/dns` and freely inspired by `bogdanovich/dns_resolver`.
 
 ## Features
 
-- Supports system default resolvers along with user supplied ones
-- Retries dns requests in case of I/O, Time, Network failures
+- Supports both system default DNS resolvers and user-provided ones
+- Retries DNS requests in case of I/O errors, timeouts, or network failures
 - Allows arbitrary query types
 - Resolution with random resolvers
+- Compatible with various DNS resolver protocols (TCP, UDP, DoH, and DoT)
 
 ### Using *go get*
 
