@@ -4,10 +4,11 @@ Based on `miekg/dns` and freely inspired by `bogdanovich/dns_resolver`.
 
 ## Features
 
-- Supports system default resolvers along with user supplied ones
-- Retries dns requests in case of I/O, Time, Network failures
+- Supports both system default DNS resolvers and user-provided ones
+- Retries DNS requests in case of I/O errors, timeouts, or network failures
 - Allows arbitrary query types
 - Resolution with random resolvers
+- Compatible with various DNS resolver protocols (TCP, UDP, DoH, and DoT)
 
 ### Using *go get*
 
@@ -42,11 +43,16 @@ import (
 )
 
 func main() {
-    // it requires a list of resolvers
-    resolvers := []string{"8.8.8.8:53", "8.8.4.4:53"}
+    // It requires a list of resolvers.
+    // Valid protocols are "udp", "tcp", "doh", "dot". Default are "udp".
+    resolvers := []string{"8.8.8.8:53", "8.8.4.4:53", "tcp:1.1.1.1"}
     retries := 2
     hostname := "hackerone.com"
-    dnsClient := retryabledns.New(resolvers, retries)
+
+    dnsClient, err := retryabledns.New(resolvers, retries)
+    if err != nil {
+        log.Fatal(err)
+    }
 
     ips, err := dnsClient.Resolve(hostname)
     if err != nil {
