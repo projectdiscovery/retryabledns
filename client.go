@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,9 +21,8 @@ import (
 	iputil "github.com/projectdiscovery/utils/ip"
 	mapsutil "github.com/projectdiscovery/utils/maps"
 	sliceutil "github.com/projectdiscovery/utils/slice"
+	"golang.org/x/net/proxy"
 )
-
-var ()
 
 var (
 	// DefaultMaxPerCNAMEFollows is the default number of times a CNAME can be followed within a trace
@@ -53,6 +53,9 @@ type Client struct {
 	tcpClient    *dns.Client
 	dohClient    *doh.Client
 	dotClient    *dns.Client
+	udpProxy     proxy.Dialer
+	tcpProxy     proxy.Dialer
+	dotProxy     proxy.Dialer
 	knownHosts   map[string][]string
 }
 
@@ -76,39 +79,70 @@ func NewWithOptions(options Options) (*Client, error) {
 		options.MaxPerCNAMEFollows = DefaultMaxPerCNAMEFollows
 	}
 
-	httpClient := doh.NewHttpClientWithTimeout(options.Timeout)
+	httpClient := doh.NewHttpClient(
+		doh.WithTimeout(options.Timeout),
+		doh.WithInsecureSkipVerify(),
+		doh.WithProxy(options.Proxy), // no-op if empty
+	)
+
+	udpDialer := &net.Dialer{LocalAddr: options.GetLocalAddr(UDP)}
+	tcpDialer := &net.Dialer{LocalAddr: options.GetLocalAddr(TCP)}
+	dotDialer := &net.Dialer{LocalAddr: options.GetLocalAddr(TCP)}
+
+	udpClient := &dns.Client{
+		Net:     "",
+		Timeout: options.Timeout,
+		Dialer:  udpDialer,
+	}
+	tcpClient := &dns.Client{
+		Net:     TCP.String(),
+		Timeout: options.Timeout,
+		Dialer:  tcpDialer,
+	}
+	dohClient := doh.NewWithOptions(
+		doh.Options{
+			HttpClient: httpClient,
+		},
+	)
+	dotClient := &dns.Client{
+		Net:     "tcp-tls",
+		Timeout: options.Timeout,
+		Dialer:  dotDialer,
+	}
 
 	client := Client{
-		options:   options,
-		resolvers: parsedBaseResolvers,
-		udpClient: &dns.Client{
-			Net:     "",
-			Timeout: options.Timeout,
-			Dialer: &net.Dialer{
-				LocalAddr: options.GetLocalAddr(UDP),
-			},
-		},
-		tcpClient: &dns.Client{
-			Net:     TCP.String(),
-			Timeout: options.Timeout,
-			Dialer: &net.Dialer{
-				LocalAddr: options.GetLocalAddr(TCP),
-			},
-		},
-		dohClient: doh.NewWithOptions(
-			doh.Options{
-				HttpClient: httpClient,
-			},
-		),
-		dotClient: &dns.Client{
-			Net:     "tcp-tls",
-			Timeout: options.Timeout,
-			Dialer: &net.Dialer{
-				LocalAddr: options.GetLocalAddr(TCP),
-			},
-		},
+		options:    options,
+		resolvers:  parsedBaseResolvers,
+		udpClient:  udpClient,
+		tcpClient:  tcpClient,
+		dohClient:  dohClient,
+		dotClient:  dotClient,
 		knownHosts: knownHosts,
 	}
+
+	if options.Proxy != "" {
+		proxyURL, err := url.Parse(options.Proxy)
+		if err != nil {
+			return nil, fmt.Errorf("invalid proxy URL: %v", err)
+		}
+		proxyDialer, err := proxy.FromURL(proxyURL, udpDialer)
+		if err != nil {
+			return nil, fmt.Errorf("error creating proxy dialer: %v", err)
+		}
+		tcpProxyDialer, err := proxy.FromURL(proxyURL, tcpDialer)
+		if err != nil {
+			return nil, fmt.Errorf("error creating proxy dialer: %v", err)
+		}
+		dotProxyDialer, err := proxy.FromURL(proxyURL, dotDialer)
+		if err != nil {
+			return nil, fmt.Errorf("error creating proxy dialer: %v", err)
+		}
+
+		client.udpProxy = proxyDialer
+		client.tcpProxy = tcpProxyDialer
+		client.dotProxy = dotProxyDialer
+	}
+
 	if options.ConnectionPoolThreads > 1 {
 		client.udpConnPool = mapsutil.SyncLockMap[string, *ConnPool]{
 			Map: make(mapsutil.Map[string, *ConnPool]),
@@ -170,12 +204,30 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 		case *NetworkResolver:
 			switch r.Protocol {
 			case TCP:
-				resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
+				if c.tcpProxy != nil {
+					var tcpConn *dns.Conn
+					tcpConn, err = c.dialWithProxy(c.tcpProxy, "tcp", resolver.String())
+					if err != nil {
+						break
+					}
+					defer tcpConn.Close()
+					resp, _, err = c.tcpClient.ExchangeWithConn(msg, tcpConn)
+				} else {
+					resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
+				}
 			case UDP:
 				if c.options.ConnectionPoolThreads > 1 {
 					if udpConnPool, ok := c.udpConnPool.Get(resolver.String()); ok {
 						resp, _, err = udpConnPool.Exchange(context.TODO(), c.udpClient, msg)
 					}
+				} else if c.udpProxy != nil {
+					var udpConn *dns.Conn
+					udpConn, err = c.dialWithProxy(c.udpProxy, "udp", resolver.String())
+					if err != nil {
+						break
+					}
+					defer udpConn.Close()
+					resp, _, err = c.udpClient.ExchangeWithConn(msg, udpConn)
 				} else {
 					resp, _, err = c.udpClient.Exchange(msg, resolver.String())
 				}
@@ -202,6 +254,14 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 		return resp, nil
 	}
 	return resp, ErrRetriesExceeded
+}
+
+func (c *Client) dialWithProxy(dialer proxy.Dialer, network, addr string) (*dns.Conn, error) {
+	conn, err := dialer.Dial(network, addr)
+	if err != nil {
+		return nil, err
+	}
+	return &dns.Conn{Conn: conn}, nil
 }
 
 // Query sends a provided dns request and return enriched response

@@ -21,7 +21,10 @@ func NewWithOptions(options Options) *Client {
 }
 
 func New() *Client {
-	httpClient := NewHttpClientWithTimeout(DefaultTimeout)
+	httpClient := NewHttpClient(
+		WithTimeout(DefaultTimeout),
+		WithInsecureSkipVerify(),
+	)
 	return NewWithOptions(Options{DefaultResolver: Cloudflare, HttpClient: httpClient})
 }
 
