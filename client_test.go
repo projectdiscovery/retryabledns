@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/miekg/dns"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -145,6 +146,22 @@ func TestRetries(t *testing.T) {
 	// Test with raw Do() interface as well
 	_, err = client.Do(msg)
 	require.True(t, err == ErrRetriesExceeded)
+}
+
+func TestNoRecords(t *testing.T) {
+	client, err := New([]string{"8.8.8.8:53", "1.1.1.1:53"}, 5)
+	require.NoError(t, err)
+
+	// Test various query types
+	res, err := client.QueryMultiple("donotexist.scanme.sh", []uint16{
+		dns.TypeA,
+		dns.TypeAAAA,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+
+	assert.Empty(t, res.A)
+	assert.Empty(t, res.AAAA)
 }
 
 func TestTrace(t *testing.T) {
