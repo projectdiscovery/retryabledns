@@ -129,7 +129,7 @@ func TestRetries(t *testing.T) {
 
 	// Test that error is returned on max retries, should conn refused 5 times then err
 	_, err := client.QueryMultiple("scanme.sh", []uint16{dns.TypeA})
-	require.True(t, err == ErrRetriesExceeded)
+	require.ErrorIs(t, err, ErrRetriesExceeded)
 
 	msg := &dns.Msg{}
 	msg.Id = dns.Id()
