@@ -497,8 +497,8 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 			}
 		}
 		// Finished retry loop at limit, bail out
-		if i == c.options.MaxRetries {
-			err = ErrRetriesExceeded
+		if i == c.options.MaxRetries && err != nil {
+			err = errors.Join(ErrRetriesExceeded, err)
 			break
 		}
 	}
