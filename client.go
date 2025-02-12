@@ -451,6 +451,10 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 				continue
 			}
 
+			if resp != nil && resp.Rcode != dns.RcodeSuccess {
+				continue
+			}
+
 			// https://github.com/projectdiscovery/retryabledns/issues/25
 			if resp != nil && resp.Truncated && c.TCPFallback {
 				resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
@@ -748,6 +752,7 @@ func (d *DNSData) ParseFromRR(rrs []dns.RR) error {
 			// Per RFC 7208, a single TXT record can be broken up into multiple parts and "MUST be treated as if those strings are concatenated
 			// together without adding spaces"; see: https://www.rfc-editor.org/rfc/rfc7208
 			d.TXT = append(d.TXT, strings.Join(recordType.Txt, ""))
+
 		case *dns.SRV:
 			d.SRV = append(d.SRV, trimChars(recordType.Target))
 		case *dns.AAAA:
