@@ -21,7 +21,6 @@ var (
 		BaseResolvers: BaseResolvers,
 		MaxRetries:    1,
 		Timeout:       3 * time.Second,
-		TCPFallback:   true,
 	}
 )
 
@@ -35,7 +34,6 @@ type Options struct {
 	ConnectionPoolThreads int
 	MaxPerCNAMEFollows    int
 	Proxy                 string
-	TCPFallback           bool
 }
 
 // Returns a net.Addr of a UDP or TCP type depending on whats required

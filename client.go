@@ -85,6 +85,20 @@ func NewWithOptions(options Options) (*Client, error) {
 		doh.WithProxy(options.Proxy), // no-op if empty
 	)
 
+	// If proxy is specified, force TCP for all resolvers
+	if options.Proxy != "" {
+		for i, resolver := range parsedBaseResolvers {
+			if networkResolver, ok := resolver.(*NetworkResolver); ok && networkResolver.Protocol == UDP {
+				// Convert UDP resolvers to TCP when proxy is specified
+				parsedBaseResolvers[i] = &NetworkResolver{
+					Protocol: TCP,
+					Host:     networkResolver.Host,
+					Port:     networkResolver.Port,
+				}
+			}
+		}
+	}
+
 	udpDialer := &net.Dialer{LocalAddr: options.GetLocalAddr(UDP)}
 	tcpDialer := &net.Dialer{LocalAddr: options.GetLocalAddr(TCP)}
 	dotDialer := &net.Dialer{LocalAddr: options.GetLocalAddr(TCP)}
@@ -111,14 +125,13 @@ func NewWithOptions(options Options) (*Client, error) {
 	}
 
 	client := Client{
-		options:     options,
-		resolvers:   parsedBaseResolvers,
-		udpClient:   udpClient,
-		tcpClient:   tcpClient,
-		dohClient:   dohClient,
-		dotClient:   dotClient,
-		knownHosts:  knownHosts,
-		TCPFallback: options.TCPFallback,
+		options:    options,
+		resolvers:  parsedBaseResolvers,
+		udpClient:  udpClient,
+		tcpClient:  tcpClient,
+		dohClient:  dohClient,
+		dotClient:  dotClient,
+		knownHosts: knownHosts,
 	}
 
 	if options.Proxy != "" {
@@ -224,11 +237,6 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 				} else if c.udpProxy != nil {
 					var udpConn *dns.Conn
 					udpConn, err = c.dialWithProxy(c.udpProxy, "udp", resolver.String())
-
-					if err != nil {
-						udpConn, err = c.dialWithProxy(c.udpProxy, "tcp", resolver.String())
-					}
-
 					if err != nil {
 						break
 					}
@@ -432,7 +440,17 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 				} else {
 					switch r.Protocol {
 					case TCP:
-						resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
+						if c.tcpProxy != nil {
+							var tcpConn *dns.Conn
+							tcpConn, err = c.dialWithProxy(c.tcpProxy, "tcp", resolver.String())
+							if err != nil {
+								break
+							}
+							defer tcpConn.Close()
+							resp, _, err = c.tcpClient.ExchangeWithConn(msg, tcpConn)
+						} else {
+							resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
+						}
 					case UDP:
 						if c.options.ConnectionPoolThreads > 1 {
 							if udpConnPool, ok := c.udpConnPool.Get(resolver.String()); ok {

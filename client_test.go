@@ -55,7 +55,7 @@ func TestConsistentResolve(t *testing.T) {
 
 	var last string
 	for i := 0; i < 10; i++ {
-		d, err := client.Resolve("example.com")
+		d, err := client.Resolve("scanme.sh")
 		require.Nil(t, err, "could not resolve dns")
 
 		if last != "" {
@@ -69,7 +69,7 @@ func TestConsistentResolve(t *testing.T) {
 func TestUDP(t *testing.T) {
 	client, _ := New([]string{"1.1.1.1:53", "udp:8.8.8.8"}, 5)
 
-	d, err := client.QueryMultiple("example.com", []uint16{dns.TypeA})
+	d, err := client.QueryMultiple("scanme.sh", []uint16{dns.TypeA})
 	require.Nil(t, err)
 
 	// From current dig result
@@ -79,7 +79,7 @@ func TestUDP(t *testing.T) {
 func TestTCP(t *testing.T) {
 	client, _ := New([]string{"tcp:1.1.1.1:53", "tcp:8.8.8.8"}, 5)
 
-	d, err := client.QueryMultiple("example.com", []uint16{dns.TypeA})
+	d, err := client.QueryMultiple("scanme.sh", []uint16{dns.TypeA})
 	require.Nil(t, err)
 
 	// From current dig result
@@ -89,7 +89,7 @@ func TestTCP(t *testing.T) {
 func TestDOH(t *testing.T) {
 	client, _ := New([]string{"doh:https://doh.opendns.com/dns-query:post", "doh:https://doh.opendns.com/dns-query:get"}, 5)
 
-	d, err := client.QueryMultiple("example.com", []uint16{dns.TypeA})
+	d, err := client.QueryMultiple("scanme.sh", []uint16{dns.TypeA})
 	require.Nil(t, err)
 
 	// From current dig result
@@ -99,7 +99,7 @@ func TestDOH(t *testing.T) {
 func TestDOT(t *testing.T) {
 	client, _ := New([]string{"dot:dns.google:853", "dot:1dot1dot1dot1.cloudflare-dns.com"}, 5)
 
-	d, err := client.QueryMultiple("example.com", []uint16{dns.TypeA})
+	d, err := client.QueryMultiple("scanme.sh", []uint16{dns.TypeA})
 	require.Nil(t, err)
 
 	// From current dig result
