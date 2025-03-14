@@ -11,7 +11,7 @@ func TestConsistentResolve(t *testing.T) {
 	client := New()
 	var lastAnswer string
 	for i := 0; i < 10; i++ {
-		d, err := client.Query("example.com", A)
+		d, err := client.Query("scanme.sh", A)
 		require.Nil(t, err, "could not resolve dns")
 		if lastAnswer == "" {
 			lastAnswer = d.Answer[0].Data
