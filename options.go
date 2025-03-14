@@ -10,6 +10,19 @@ import (
 var (
 	ErrMaxRetriesZero = errors.New("retries must be at least 1")
 	ErrResolversEmpty = errors.New("resolvers list must not be empty")
+
+	BaseResolvers = []string{
+		"1.1.1.1:53",
+		"1.0.0.1:53",
+		"8.8.8.8:53",
+		"8.8.4.4:53",
+	}
+	DefaultOptions = Options{
+		BaseResolvers: BaseResolvers,
+		MaxRetries:    1,
+		Timeout:       3 * time.Second,
+		TCPFallback:   true,
+	}
 )
 
 type Options struct {
@@ -22,6 +35,7 @@ type Options struct {
 	ConnectionPoolThreads int
 	MaxPerCNAMEFollows    int
 	Proxy                 string
+	TCPFallback           bool
 }
 
 // Returns a net.Addr of a UDP or TCP type depending on whats required

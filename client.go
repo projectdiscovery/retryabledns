@@ -111,13 +111,14 @@ func NewWithOptions(options Options) (*Client, error) {
 	}
 
 	client := Client{
-		options:    options,
-		resolvers:  parsedBaseResolvers,
-		udpClient:  udpClient,
-		tcpClient:  tcpClient,
-		dohClient:  dohClient,
-		dotClient:  dotClient,
-		knownHosts: knownHosts,
+		options:     options,
+		resolvers:   parsedBaseResolvers,
+		udpClient:   udpClient,
+		tcpClient:   tcpClient,
+		dohClient:   dohClient,
+		dotClient:   dotClient,
+		knownHosts:  knownHosts,
+		TCPFallback: options.TCPFallback,
 	}
 
 	if options.Proxy != "" {
@@ -223,6 +224,11 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 				} else if c.udpProxy != nil {
 					var udpConn *dns.Conn
 					udpConn, err = c.dialWithProxy(c.udpProxy, "udp", resolver.String())
+
+					if err != nil {
+						udpConn, err = c.dialWithProxy(c.udpProxy, "tcp", resolver.String())
+					}
+
 					if err != nil {
 						break
 					}
