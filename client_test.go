@@ -170,3 +170,90 @@ func TestTrace(t *testing.T) {
 	_, err := client.Trace("www.projectdiscovery.io", dns.TypeA, 100)
 	require.Nil(t, err, "could not resolve dns")
 }
+
+func TestInternalIPDetectionWithHostsFile(t *testing.T) {
+	CheckInternalIPs = true
+	defer func() { CheckInternalIPs = false }()
+
+	options := Options{
+		BaseResolvers: []string{"8.8.8.8:53"},
+		MaxRetries:    3,
+		Hostsfile:     true,
+	}
+
+	client, err := NewWithOptions(options)
+	require.NoError(t, err)
+
+	client.knownHosts = map[string][]string{
+		"localhost":     {"127.0.0.1", "::1"},
+		"internal.test": {"192.168.1.100", "10.0.0.1"},
+		"external.test": {"8.8.8.8"},
+	}
+
+	testCases := []struct {
+		host               string
+		expectedInternal   bool
+		expectedInternalIP []string
+	}{
+		{
+			host:               "localhost",
+			expectedInternal:   true,
+			expectedInternalIP: []string{"127.0.0.1", "::1"},
+		},
+		{
+			host:               "internal.test",
+			expectedInternal:   true,
+			expectedInternalIP: []string{"192.168.1.100", "10.0.0.1"},
+		},
+		{
+			host:             "external.test",
+			expectedInternal: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.host, func(t *testing.T) {
+			result, err := client.QueryMultiple(tc.host, []uint16{dns.TypeA, dns.TypeAAAA})
+			require.NoError(t, err)
+			require.True(t, result.HostsFile)
+
+			if tc.expectedInternal {
+				assert.True(t, result.HasInternalIPs, "HasInternalIPs should be true for %s", tc.host)
+				assert.ElementsMatch(t, tc.expectedInternalIP, result.InternalIPs, "InternalIPs should match for %s", tc.host)
+			} else {
+				assert.False(t, result.HasInternalIPs, "HasInternalIPs should be false for %s", tc.host)
+				assert.Empty(t, result.InternalIPs, "InternalIPs should be empty for %s", tc.host)
+			}
+		})
+	}
+}
+
+func TestInternalIPDetectionJSONOutput(t *testing.T) {
+	CheckInternalIPs = true
+	defer func() { CheckInternalIPs = false }()
+
+	options := Options{
+		BaseResolvers: []string{"8.8.8.8:53"},
+		MaxRetries:    3,
+		Hostsfile:     true,
+	}
+
+	client, err := NewWithOptions(options)
+	require.NoError(t, err)
+
+	client.knownHosts = map[string][]string{
+		"localhost": {"127.0.0.1"},
+	}
+
+	result, err := client.QueryMultiple("localhost", []uint16{dns.TypeA})
+	require.NoError(t, err)
+
+	jsonOutput, err := result.JSON()
+	require.NoError(t, err)
+
+	t.Logf("JSON output for localhost with internal IP detection:\n%s", jsonOutput)
+
+	assert.Contains(t, jsonOutput, `"has_internal_ips":true`)
+	assert.Contains(t, jsonOutput, `"internal_ips":["127.0.0.1"]`)
+	assert.Contains(t, jsonOutput, `"hosts_file":true`)
+}
