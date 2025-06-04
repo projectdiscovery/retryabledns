@@ -366,8 +366,20 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 			for _, ip := range ips {
 				if iputil.IsIPv4(ip) {
 					dnsdata.A = append(dnsdata.A, ip)
+					if CheckInternalIPs && internalRangeCheckerInstance != nil {
+						if parsedIP := net.ParseIP(ip); parsedIP != nil && internalRangeCheckerInstance.ContainsIPv4(parsedIP) {
+							dnsdata.HasInternalIPs = true
+							dnsdata.InternalIPs = append(dnsdata.InternalIPs, ip)
+						}
+					}
 				} else if iputil.IsIPv6(ip) {
 					dnsdata.AAAA = append(dnsdata.AAAA, ip)
+					if CheckInternalIPs && internalRangeCheckerInstance != nil {
+						if parsedIP := net.ParseIP(ip); parsedIP != nil && internalRangeCheckerInstance.ContainsIPv6(parsedIP) {
+							dnsdata.HasInternalIPs = true
+							dnsdata.InternalIPs = append(dnsdata.InternalIPs, ip)
+						}
+					}
 				}
 			}
 		}
