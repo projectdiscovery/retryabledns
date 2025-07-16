@@ -840,8 +840,32 @@ func (d *DNSData) dedupe() {
 	d.NS = sliceutil.Dedupe(d.NS)
 	d.TXT = sliceutil.Dedupe(d.TXT)
 	d.SRV = sliceutil.Dedupe(d.SRV)
+	d.SOA = d.dedupeSOA(d.SOA)
 	d.CAA = sliceutil.Dedupe(d.CAA)
 	d.AllRecords = sliceutil.Dedupe(d.AllRecords)
+}
+
+// dedupeSOA removes duplicate SOA records based on all fields
+func (d *DNSData) dedupeSOA(soaRecords []SOA) []SOA {
+	if len(soaRecords) <= 1 {
+		return soaRecords
+	}
+
+	seen := make(map[string]struct{})
+	var result []SOA
+
+	for _, soa := range soaRecords {
+		// Create a unique key based on all SOA fields
+		key := fmt.Sprintf("%s|%s|%s|%d|%d|%d|%d|%d",
+			soa.Name, soa.NS, soa.Mbox, soa.Serial, soa.Refresh, soa.Retry, soa.Expire, soa.Minttl)
+
+		if _, exists := seen[key]; !exists {
+			seen[key] = struct{}{}
+			result = append(result, soa)
+		}
+	}
+
+	return result
 }
 
 // Marshal encodes the dnsdata to a binary representation
