@@ -800,9 +800,7 @@ func (d *DNSData) ParseFromRR(rrs []dns.RR) error {
 
 // ParseFromMsg and enrich data
 func (d *DNSData) ParseFromMsg(msg *dns.Msg) error {
-	allRecords := append(msg.Answer, msg.Extra...)
-	allRecords = append(allRecords, msg.Ns...)
-	return d.ParseFromRR(allRecords)
+	return d.ParseFromRR(msg.Answer)
 }
 
 func (d *DNSData) ParseFromEnvelopeChan(envChan chan *dns.Envelope) error {

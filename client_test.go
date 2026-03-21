@@ -171,6 +171,55 @@ func TestTrace(t *testing.T) {
 	require.Nil(t, err, "could not resolve dns")
 }
 
+func TestParseFromMsgIgnoresExtraAndNsSections(t *testing.T) {
+	msg := new(dns.Msg)
+	msg.SetQuestion("example.com.", dns.TypeA)
+
+	msg.Answer = []dns.RR{
+		&dns.A{
+			Hdr: dns.RR_Header{Name: "example.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+			A:   []byte{93, 184, 216, 34},
+		},
+	}
+
+	msg.Ns = []dns.RR{
+		&dns.NS{
+			Hdr: dns.RR_Header{Name: "example.com.", Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 3600},
+			Ns:  "ns1.example.com.",
+		},
+		&dns.SOA{
+			Hdr:     dns.RR_Header{Name: "example.com.", Rrtype: dns.TypeSOA, Class: dns.ClassINET, Ttl: 3600},
+			Ns:      "ns1.example.com.",
+			Mbox:    "admin.example.com.",
+			Serial:  2024010101,
+			Refresh: 7200,
+			Retry:   3600,
+			Expire:  1209600,
+			Minttl:  300,
+		},
+	}
+
+	msg.Extra = []dns.RR{
+		&dns.A{
+			Hdr: dns.RR_Header{Name: "ns1.example.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 3600},
+			A:   []byte{198, 51, 100, 1},
+		},
+		&dns.AAAA{
+			Hdr:  dns.RR_Header{Name: "ns1.example.com.", Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 3600},
+			AAAA: []byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01},
+		},
+	}
+
+	d := &DNSData{}
+	err := d.ParseFromMsg(msg)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"93.184.216.34"}, d.A, "only Answer A records should be parsed")
+	assert.Empty(t, d.AAAA, "Additional AAAA glue records should not leak")
+	assert.Empty(t, d.NS, "Authority NS records should not leak")
+	assert.Empty(t, d.SOA, "Authority SOA records should not leak")
+}
+
 func TestInternalIPDetectionWithHostsFile(t *testing.T) {
 	CheckInternalIPs = true
 	defer func() { CheckInternalIPs = false }()
