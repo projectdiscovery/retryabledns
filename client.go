@@ -681,7 +681,11 @@ func (c *Client) axfr(host string) (*AXFRData, error) {
 		}
 	}
 
-	resolvers = append(resolvers, c.resolvers...)
+	for _, r := range c.resolvers {
+		if nr, ok := r.(*NetworkResolver); ok {
+			resolvers = append(resolvers, &NetworkResolver{Protocol: TCP, Host: nr.Host, Port: nr.Port})
+		}
+	}
 
 	var data []*DNSData
 	// perform zone transfer for each ns
