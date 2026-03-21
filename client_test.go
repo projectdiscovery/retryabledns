@@ -171,6 +171,24 @@ func TestTrace(t *testing.T) {
 	require.Nil(t, err, "could not resolve dns")
 }
 
+func TestAXFRWithUDPResolvers(t *testing.T) {
+	// Resolver configured without tcp: prefix defaults to UDP.
+	// AXFR requires TCP, so axfr() must force TCP on fallback resolvers.
+	client, err := New([]string{"81.4.108.41:53"}, 3)
+	require.NoError(t, err)
+
+	axfrData, err := client.AXFR("zonetransfer.me")
+	require.NoError(t, err)
+	require.NotNil(t, axfrData)
+	require.True(t, len(axfrData.DNSData) > 0, "expected AXFR records but got none")
+
+	var totalRecords int
+	for _, d := range axfrData.DNSData {
+		totalRecords += len(d.AllRecords)
+	}
+	require.True(t, totalRecords > 0, "expected non-empty AXFR records")
+}
+
 func TestParseFromMsgIgnoresExtraAndNsSections(t *testing.T) {
 	msg := new(dns.Msg)
 	msg.SetQuestion("example.com.", dns.TypeA)
