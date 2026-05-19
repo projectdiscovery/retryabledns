@@ -2,191 +2,217 @@ package retryabledns
 
 import (
 	"testing"
+	"time"
 
 	"github.com/miekg/dns"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+const fakeHost = "scanme.test"
+
 func TestDialerLocalAddr(t *testing.T) {
+	fr := newFakeResolver(t, dns.RcodeSuccess, arecord(fakeHost, "203.0.113.10"))
+
 	/** Works without LocalAddrIP **/
 	options := Options{
-		BaseResolvers: []string{"1.1.1.1:53", "udp:8.8.8.8"},
+		BaseResolvers: []string{fr.Addr()},
 		MaxRetries:    3,
+		Timeout:       500 * time.Millisecond,
 	}
-	err := options.Validate()
-	require.Nil(t, err)
-	client, _ := NewWithOptions(options)
-	d, err := client.QueryMultiple("example.com", []uint16{dns.TypeA})
-	require.Nil(t, err)
-	// From current dig result
-	require.True(t, len(d.A) > 0)
+	require.NoError(t, options.Validate())
+	client, err := NewWithOptions(options)
+	require.NoError(t, err)
+	d, err := client.QueryMultiple(fakeHost, []uint16{dns.TypeA})
+	require.NoError(t, err)
+	require.Equal(t, []string{"203.0.113.10"}, d.A)
 
 	/** Errors with invalid LocalAddrIP **/
+	// 1.2.3.4 is not assigned to any local interface, so the dialer
+	// must fail to bind regardless of where the resolver lives.
 	options = Options{
-		BaseResolvers: []string{"1.1.1.1:53", "udp:8.8.8.8"},
+		BaseResolvers: []string{fr.Addr()},
 		MaxRetries:    3,
+		Timeout:       500 * time.Millisecond,
 	}
 	options.SetLocalAddrIP("1.2.3.4")
-	err = options.Validate()
-	require.Nil(t, err)
-	client, _ = NewWithOptions(options)
-	_, err = client.QueryMultiple("example.com", []uint16{dns.TypeA})
-	require.NotNil(t, err)
-
-	/** Does not error with valid Local IP **/
-	// options = Options{
-	// 	BaseResolvers: []string{"1.1.1.1:53", "udp:8.8.8.8"},
-	// 	MaxRetries:    3,
-	// }
-	// err = options.SetLocalAddrIPFromNetInterface("en0")
-	// require.Nil(t, err)
-	// err = options.Validate()
-	// require.Nil(t, err)
-	// client, _ = NewWithOptions(options)
-	// _, err = client.QueryMultiple("example.com", []uint16{dns.TypeA})
-	// require.Nil(t, err)
-	// // From current dig result
-	// require.True(t, len(d.A) > 0)
+	require.NoError(t, options.Validate())
+	client, err = NewWithOptions(options)
+	require.NoError(t, err)
+	_, err = client.QueryMultiple(fakeHost, []uint16{dns.TypeA})
+	require.Error(t, err)
 }
 
 func TestConsistentResolve(t *testing.T) {
-	client, _ := New([]string{"8.8.8.8:53", "1.1.1.1:53"}, 5)
+	fr := newFakeResolver(t, dns.RcodeSuccess, arecord(fakeHost, "203.0.113.10"))
+	client, err := New([]string{fr.Addr()}, 5)
+	require.NoError(t, err)
 
-	var last string
 	for i := 0; i < 10; i++ {
-		d, err := client.Resolve("scanme.sh")
-		require.Nil(t, err, "could not resolve dns")
-
-		if last != "" {
-			require.Equal(t, last, d.A[0], "got another data from previous")
-		} else {
-			last = d.A[0]
-		}
+		d, err := client.Resolve(fakeHost)
+		require.NoError(t, err, "could not resolve dns")
+		require.Equal(t, []string{"203.0.113.10"}, d.A, "iteration %d returned different data", i)
 	}
 }
 
 func TestUDP(t *testing.T) {
-	client, _ := New([]string{"1.1.1.1:53", "udp:8.8.8.8"}, 5)
+	fr := newFakeResolver(t, dns.RcodeSuccess, arecord(fakeHost, "203.0.113.10"))
+	client, err := New([]string{"udp:" + fr.Addr()}, 5)
+	require.NoError(t, err)
 
-	d, err := client.QueryMultiple("scanme.sh", []uint16{dns.TypeA})
-	require.Nil(t, err)
-
-	// From current dig result
-	require.True(t, len(d.A) > 0)
+	d, err := client.QueryMultiple(fakeHost, []uint16{dns.TypeA})
+	require.NoError(t, err)
+	require.NotEmpty(t, d.A)
 }
 
 func TestTCP(t *testing.T) {
-	client, _ := New([]string{"tcp:1.1.1.1:53", "tcp:8.8.8.8"}, 5)
+	fr := newFakeResolverTCP(t, dns.RcodeSuccess, arecord(fakeHost, "203.0.113.10"))
+	client, err := New([]string{"tcp:" + fr.Addr()}, 5)
+	require.NoError(t, err)
 
-	d, err := client.QueryMultiple("scanme.sh", []uint16{dns.TypeA})
-	require.Nil(t, err)
-
-	// From current dig result
-	require.True(t, len(d.A) > 0)
+	d, err := client.QueryMultiple(fakeHost, []uint16{dns.TypeA})
+	require.NoError(t, err)
+	require.NotEmpty(t, d.A)
 }
 
 func TestDOH(t *testing.T) {
-	client, _ := New([]string{"doh:https://doh.opendns.com/dns-query:post", "doh:https://doh.opendns.com/dns-query:get"}, 5)
+	fd := newFakeDoHResolver(t, dns.RcodeSuccess, arecord(fakeHost, "203.0.113.10"))
 
-	d, err := client.QueryMultiple("scanme.sh", []uint16{dns.TypeA})
-	require.Nil(t, err)
-
-	// From current dig result
-	require.True(t, len(d.A) > 0)
+	for _, method := range []string{"post", "get"} {
+		t.Run(method, func(t *testing.T) {
+			client, err := New([]string{fd.ResolverString(method)}, 5)
+			require.NoError(t, err)
+			d, err := client.QueryMultiple(fakeHost, []uint16{dns.TypeA})
+			require.NoError(t, err)
+			require.NotEmpty(t, d.A)
+		})
+	}
 }
 
+// TestDOT is intentionally an integration test against public DoT
+// resolvers because the retryabledns client builds its internal dot
+// client without a configurable *tls.Config, so we can't accept a
+// self-signed cert from an in-process server. It's gated by
+// testing.Short so it stays out of unit-test runs.
 func TestDOT(t *testing.T) {
-	client, _ := New([]string{"dot:dns.google:853", "dot:1dot1dot1dot1.cloudflare-dns.com"}, 5)
-
+	if testing.Short() {
+		t.Skip("DOT test requires real network in -short mode")
+	}
+	client, err := New(
+		[]string{"dot:dns.google:853", "dot:1dot1dot1dot1.cloudflare-dns.com"}, 5,
+	)
+	require.NoError(t, err)
 	d, err := client.QueryMultiple("scanme.sh", []uint16{dns.TypeA})
-	require.Nil(t, err)
-
-	// From current dig result
-	require.True(t, len(d.A) > 0)
+	require.NoError(t, err)
+	require.NotEmpty(t, d.A)
 }
 
 func TestQueryMultiple(t *testing.T) {
-	client, _ := New([]string{"8.8.8.8:53", "1.1.1.1:53"}, 5)
+	fr := newFakeResolverFunc(t, rrByQtype(map[uint16][]dns.RR{
+		dns.TypeA:    {arecord(fakeHost, "203.0.113.10")},
+		dns.TypeAAAA: {aaaarecord(fakeHost, "2001:db8::1")},
+		dns.TypeSOA:  {soarecord(fakeHost)},
+	}))
 
-	// Test various query types
-	d, err := client.QueryMultiple("scanme.sh", []uint16{
+	client, err := New([]string{fr.Addr()}, 5)
+	require.NoError(t, err)
+
+	d, err := client.QueryMultiple(fakeHost, []uint16{
 		dns.TypeA,
 		dns.TypeAAAA,
 		dns.TypeSOA,
 	})
-	require.Nil(t, err)
-
-	// From current dig result
-	require.True(t, len(d.A) > 0)
-	require.True(t, len(d.AAAA) > 0)
-	require.True(t, len(d.SOA) > 0)
+	require.NoError(t, err)
+	require.Equal(t, []string{"203.0.113.10"}, d.A)
+	require.Equal(t, []string{"2001:db8::1"}, d.AAAA)
+	require.Len(t, d.SOA, 1)
 	require.NotZero(t, d.TTL)
 }
 
 func TestRetries(t *testing.T) {
-	client, _ := New([]string{"127.0.0.1"}, 5)
+	dead := freeUDPAddr(t)
+	client, err := New([]string{dead}, 5)
+	require.NoError(t, err)
 
-	// Test that error is returned on max retries, should conn refused 5 times then err
-	_, err := client.QueryMultiple("scanme.sh", []uint16{dns.TypeA})
+	// QueryMultiple path: ErrRetriesExceeded after exhausting retries
+	// against an unbound port.
+	_, err = client.QueryMultiple(fakeHost, []uint16{dns.TypeA})
 	require.ErrorIs(t, err, ErrRetriesExceeded)
 
+	// Do() path: same expectation via the raw interface.
 	msg := &dns.Msg{}
 	msg.Id = dns.Id()
 	msg.SetEdns0(4096, false)
-	msg.Question = make([]dns.Question, 1)
-	msg.RecursionDesired = true
-	question := dns.Question{
-		Name:   "scanme.sh",
+	msg.Question = []dns.Question{{
+		Name:   dns.Fqdn(fakeHost),
 		Qtype:  dns.TypeA,
 		Qclass: dns.ClassINET,
-	}
-	msg.Question[0] = question
-
-	// Test with raw Do() interface as well
+	}}
+	msg.RecursionDesired = true
 	_, err = client.Do(msg)
-	require.True(t, err == ErrRetriesExceeded)
+	require.ErrorIs(t, err, ErrRetriesExceeded)
 }
 
 func TestNoRecords(t *testing.T) {
-	client, err := New([]string{"8.8.8.8:53", "1.1.1.1:53"}, 5)
+	// A resolver that answers NOERROR but with no records: the
+	// canonical "host exists but no A/AAAA" path.
+	fr := newFakeResolverFunc(t, rrByQtype(map[uint16][]dns.RR{
+		// No entries: handler returns SUCCESS with empty Answer.
+	}))
+	client, err := New([]string{fr.Addr()}, 5)
 	require.NoError(t, err)
 
-	// Test various query types
-	res, err := client.QueryMultiple("donotexist.scanme.sh", []uint16{
+	res, err := client.QueryMultiple("donotexist."+fakeHost, []uint16{
 		dns.TypeA,
 		dns.TypeAAAA,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, res)
-
 	assert.Empty(t, res.A)
 	assert.Empty(t, res.AAAA)
 }
 
+// TestTrace remains a network-dependent integration test: it walks the
+// DNS root servers from RootDNSServersIPv4 and follows referrals,
+// which is not feasible to replicate with a local fake. Guard with
+// testing.Short so unit-test runs stay offline.
 func TestTrace(t *testing.T) {
-	client, _ := New([]string{"8.8.8.8:53", "1.1.1.1:53"}, 5)
-
-	_, err := client.Trace("www.projectdiscovery.io", dns.TypeA, 100)
-	require.Nil(t, err, "could not resolve dns")
+	if testing.Short() {
+		t.Skip("Trace test requires real DNS roots in -short mode")
+	}
+	client, err := New([]string{"8.8.8.8:53", "1.1.1.1:53"}, 5)
+	require.NoError(t, err)
+	_, err = client.Trace("www.projectdiscovery.io", dns.TypeA, 100)
+	require.NoError(t, err)
 }
 
 func TestAXFRWithUDPResolvers(t *testing.T) {
-	// Resolver configured without tcp: prefix defaults to UDP.
-	// AXFR requires TCP, so axfr() must force TCP on fallback resolvers.
-	client, err := New([]string{"81.4.108.41:53"}, 3)
+	// Resolver address configured without a tcp: prefix defaults to
+	// UDP. AXFR is TCP-only, so axfr() must force TCP on the fallback
+	// path - we verify that by starting a TCP-only AXFR server and
+	// passing its address as a plain (UDP-by-default) resolver string.
+	// AXFR protocol requires the zone to start and end with an SOA.
+	records := []dns.RR{
+		soarecord("zonetransfer.test"),
+		arecord("ns1.zonetransfer.test", "203.0.113.1"),
+		arecord("host.zonetransfer.test", "203.0.113.2"),
+		soarecord("zonetransfer.test"),
+	}
+	fr := newFakeAXFRResolver(t, records)
+
+	client, err := New([]string{fr.Addr()}, 3)
 	require.NoError(t, err)
 
-	axfrData, err := client.AXFR("zonetransfer.me")
+	axfrData, err := client.AXFR("zonetransfer.test")
 	require.NoError(t, err)
 	require.NotNil(t, axfrData)
-	require.True(t, len(axfrData.DNSData) > 0, "expected AXFR records but got none")
+	require.NotEmpty(t, axfrData.DNSData, "expected AXFR records but got none")
 
 	var totalRecords int
 	for _, d := range axfrData.DNSData {
 		totalRecords += len(d.AllRecords)
 	}
-	require.True(t, totalRecords > 0, "expected non-empty AXFR records")
+	require.Greater(t, totalRecords, 0, "expected non-empty AXFR records")
 }
 
 func TestParseFromMsgIgnoresExtraAndNsSections(t *testing.T) {
@@ -242,9 +268,11 @@ func TestInternalIPDetectionWithHostsFile(t *testing.T) {
 	CheckInternalIPs = true
 	defer func() { CheckInternalIPs = false }()
 
+	fr := newFakeResolverFunc(t, rrByQtype(nil))
 	options := Options{
-		BaseResolvers: []string{"8.8.8.8:53"},
+		BaseResolvers: []string{fr.Addr()},
 		MaxRetries:    3,
+		Timeout:       500 * time.Millisecond,
 		Hostsfile:     true,
 	}
 
@@ -299,9 +327,11 @@ func TestInternalIPDetectionJSONOutput(t *testing.T) {
 	CheckInternalIPs = true
 	defer func() { CheckInternalIPs = false }()
 
+	fr := newFakeResolverFunc(t, rrByQtype(nil))
 	options := Options{
-		BaseResolvers: []string{"8.8.8.8:53"},
+		BaseResolvers: []string{fr.Addr()},
 		MaxRetries:    3,
+		Timeout:       500 * time.Millisecond,
 		Hostsfile:     true,
 	}
 
