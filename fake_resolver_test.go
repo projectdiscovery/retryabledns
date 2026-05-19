@@ -58,17 +58,6 @@ func newFakeResolverTCP(t *testing.T, rcode int, answer ...dns.RR) *fakeResolver
 	return fr
 }
 
-// newFakeResolverDualStack starts servers on the same address+port for
-// both UDP and TCP. Useful when the test needs to assert that the
-// client picks the right transport.
-func newFakeResolverDualStack(t *testing.T, respond func(*dns.Msg) *dns.Msg) *fakeResolver {
-	t.Helper()
-	fr := &fakeResolver{respond: respond}
-	fr.startUDP(t, "127.0.0.1:0")
-	fr.startTCP(t, fr.addr) // reuse the same address picked by the UDP listener
-	return fr
-}
-
 // newFakeAXFRResolver starts a dual-stack server that handles the
 // full AXFR flow: it answers the NS/A discovery probes over UDP with
 // empty NOERROR (so the client falls back to the originally
