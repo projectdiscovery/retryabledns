@@ -36,15 +36,13 @@ func Parse(p string) (map[string][]string, error) {
 		return nil, errors.New("hosts file doesn't exist")
 	}
 
-	hostsFileCh, err := fileutil.ReadFile(p)
-	if err != nil {
-		return nil, err
-	}
-
 	items := make(map[string][]string)
 	lineCount := 0
 
-	for line := range hostsFileCh {
+	for line, err := range fileutil.Lines(p) {
+		if err != nil {
+			return nil, err
+		}
 		lineCount++
 		if lineCount > MaxLines {
 			break
