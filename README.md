@@ -9,6 +9,7 @@ Based on `miekg/dns` and freely inspired by `bogdanovich/dns_resolver`.
 - Allows arbitrary query types
 - Resolution with random resolvers
 - Compatible with various DNS resolver protocols (TCP, UDP, DoH, and DoT)
+- Per-resolver stats (requests, errors, latency)
 
 ### Using *go get*
 
@@ -72,6 +73,20 @@ func main() {
     log.Println(dnsResponses)
 }
 ```
+
+## Per-resolver stats
+
+Every client automatically tracks per-resolver counters (requests, successes, errors, total/average/last round-trip, last error). Read them at any time with `Client.Stats()` and clear with `Client.ResetStats()`.
+
+```go
+stats := dnsClient.Stats()
+for resolver, s := range stats {
+    log.Printf("%s: %d req (%d ok, %d err), avg=%s last_err=%v",
+        resolver, s.Requests, s.Successes, s.Errors, s.AverageDuration, s.LastError)
+}
+```
+
+Stats are updated lock-free on the hot path and are safe to read concurrently. The snapshot returned by `Stats()` is fully owned by the caller.
 
 Credits:
 
