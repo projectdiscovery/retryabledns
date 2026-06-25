@@ -210,7 +210,21 @@ func (c *Client) Resolve(host string) (*DNSData, error) {
 func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 	var resp *dns.Msg
 	var err error
+	// activeConn holds the proxied connection dialed for the current attempt.
+	// It is closed at the top of the next iteration (and via defer on return) so
+	// that retries cannot accumulate open connections: a deferred Close inside
+	// the loop only fires when Do returns, leaking one socket per retry.
+	var activeConn *dns.Conn
+	defer func() {
+		if activeConn != nil {
+			_ = activeConn.Close()
+		}
+	}()
 	for i := 0; i < c.options.MaxRetries; i++ {
+		if activeConn != nil {
+			_ = activeConn.Close()
+			activeConn = nil
+		}
 		index := atomic.AddUint32(&c.serversIndex, 1)
 		resolver := c.resolvers[index%uint32(len(c.resolvers))]
 
@@ -224,7 +238,7 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 					if err != nil {
 						break
 					}
-					defer tcpConn.Close()
+					activeConn = tcpConn
 					resp, _, err = c.tcpClient.ExchangeWithConn(msg, tcpConn)
 				} else {
 					resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
@@ -240,7 +254,7 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 					if err != nil {
 						break
 					}
-					defer udpConn.Close()
+					activeConn = udpConn
 					resp, _, err = c.udpClient.ExchangeWithConn(msg, udpConn)
 				} else {
 					resp, _, err = c.udpClient.Exchange(msg, resolver.String())
@@ -358,7 +372,18 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 		hasResolver bool = resolver != nil
 		dnsdata     DNSData
 		err         error
+		// activeConn holds the connection dialed for the current attempt (proxy
+		// or AXFR). It is closed at the top of the next iteration and via defer
+		// on return, capping concurrent connections at one. A deferred Close
+		// inside the loop only fires when queryMultiple returns, so it would
+		// leak one socket per retry and per request type.
+		activeConn *dns.Conn
 	)
+	defer func() {
+		if activeConn != nil {
+			_ = activeConn.Close()
+		}
+	}()
 
 	// integrate data with known hosts in case
 	if c.options.Hostsfile {
@@ -425,6 +450,10 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 			i      int
 		)
 		for i = 0; i < c.options.MaxRetries; i++ {
+			if activeConn != nil {
+				_ = activeConn.Close()
+				activeConn = nil
+			}
 			index := atomic.AddUint32(&c.serversIndex, 1)
 			if !hasResolver {
 				resolver = c.resolvers[index%uint32(len(c.resolvers))]
@@ -446,7 +475,7 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 					if err != nil {
 						break
 					}
-					defer dnsconn.Close()
+					activeConn = dnsconn
 					dnsTransfer := &dns.Transfer{Conn: dnsconn}
 					trResp, err = dnsTransfer.In(msg, resolver.String())
 				} else {
@@ -458,7 +487,7 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 							if err != nil {
 								break
 							}
-							defer tcpConn.Close()
+							activeConn = tcpConn
 							resp, _, err = c.tcpClient.ExchangeWithConn(msg, tcpConn)
 						} else {
 							resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
