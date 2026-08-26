@@ -260,12 +260,17 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 			continue
 		}
 
-		if resp.Rcode != dns.RcodeSuccess {
+		if !c.options.exitOnRcode(resp.Rcode) {
 			continue
 		}
 
 		// In case we get a non empty answer stop retrying
 		return resp, nil
+	}
+	// When ExitOnStatusCodes is set, suppress non-definitive trailing
+	// responses so callers can't mistake them for an answer.
+	if len(c.options.ExitOnStatusCodes) > 0 && resp != nil && !c.options.exitOnRcode(resp.Rcode) {
+		resp = nil
 	}
 	return resp, ErrRetriesExceeded
 }
@@ -495,6 +500,15 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 				}
 			}
 
+			// https://github.com/projectdiscovery/retryabledns/issues/250
+			// When ExitOnStatusCodes is set, drop attempts whose rcode
+			// is not in the list before they touch dnsdata. This keeps
+			// dnsdata.Raw / dnsdata.Resolver / status fields free of
+			// data from intermediate non-definitive responses.
+			if resp != nil && len(c.options.ExitOnStatusCodes) > 0 && !c.options.exitOnRcode(resp.Rcode) {
+				continue
+			}
+
 			switch requestType {
 			case dns.TypeAXFR:
 				err = dnsdata.ParseFromEnvelopeChan(trResp)
@@ -520,12 +534,20 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 			dnsdata.Resolver = append(dnsdata.Resolver, resolver.String())
 
 			if err != nil || !dnsdata.contains() {
+				// An empty response can still be a definitive answer
+				// (e.g. NXDOMAIN) when the user has opted into that via
+				// ExitOnStatusCodes. Break so callers see the status
+				// code without further retries polluting dnsdata.
+				if len(c.options.ExitOnStatusCodes) > 0 && resp != nil && c.options.exitOnRcode(resp.Rcode) {
+					break
+				}
 				continue
 			}
 			dnsdata.dedupe()
 
-			// stop on success
-			if resp != nil && resp.Rcode == dns.RcodeSuccess {
+			// stop on a definitive rcode (success by default, or any of
+			// the user-provided ExitOnStatusCodes)
+			if resp != nil && c.options.exitOnRcode(resp.Rcode) {
 				break
 			}
 			if trResp != nil {
