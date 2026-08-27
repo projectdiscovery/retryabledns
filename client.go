@@ -224,7 +224,7 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 					if err != nil {
 						break
 					}
-					defer tcpConn.Close()
+					defer func() { _ = tcpConn.Close() }()
 					resp, _, err = c.tcpClient.ExchangeWithConn(msg, tcpConn)
 				} else {
 					resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
@@ -240,7 +240,7 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 					if err != nil {
 						break
 					}
-					defer udpConn.Close()
+					defer func() { _ = udpConn.Close() }()
 					resp, _, err = c.udpClient.ExchangeWithConn(msg, udpConn)
 				} else {
 					resp, _, err = c.udpClient.Exchange(msg, resolver.String())
@@ -360,7 +360,7 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 // QueryMultiple sends a provided dns request and return the data
 func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Resolver) (*DNSData, error) {
 	var (
-		hasResolver bool = resolver != nil
+		hasResolver = resolver != nil
 		dnsdata     DNSData
 		err         error
 	)
@@ -451,7 +451,7 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 					if err != nil {
 						break
 					}
-					defer dnsconn.Close()
+					defer func() { _ = dnsconn.Close() }()
 					dnsTransfer := &dns.Transfer{Conn: dnsconn}
 					trResp, err = dnsTransfer.In(msg, resolver.String())
 				} else {
@@ -463,7 +463,7 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 							if err != nil {
 								break
 							}
-							defer tcpConn.Close()
+							defer func() { _ = tcpConn.Close() }()
 							resp, _, err = c.tcpClient.ExchangeWithConn(msg, tcpConn)
 						} else {
 							resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
