@@ -57,6 +57,7 @@ type Client struct {
 	tcpProxy     proxy.Dialer
 	dotProxy     proxy.Dialer
 	knownHosts   map[string][]string
+	stats        *statsRegistry
 }
 
 // New creates a new dns client
@@ -132,6 +133,7 @@ func NewWithOptions(options Options) (*Client, error) {
 		dohClient:  dohClient,
 		dotClient:  dotClient,
 		knownHosts: knownHosts,
+		stats:      newStatsRegistry(),
 	}
 
 	if options.Proxy != "" {
@@ -214,6 +216,7 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 		index := atomic.AddUint32(&c.serversIndex, 1)
 		resolver := c.resolvers[index%uint32(len(c.resolvers))]
 
+		attemptStart := time.Now()
 		switch r := resolver.(type) {
 		case *NetworkResolver:
 			switch r.Protocol {
@@ -255,6 +258,7 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 			}
 			resp, err = c.dohClient.QueryWithDOHMsg(method, doh.Resolver{URL: r.URL}, msg)
 		}
+		c.recordAttempt(resolver, attemptStart, err)
 
 		if err != nil || resp == nil {
 			continue
@@ -434,6 +438,7 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 			if !hasResolver {
 				resolver = c.resolvers[index%uint32(len(c.resolvers))]
 			}
+			attemptStart := time.Now()
 			switch r := resolver.(type) {
 			case *NetworkResolver:
 				if requestType == dns.TypeAXFR {
@@ -487,6 +492,7 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 				}
 				resp, err = c.dohClient.QueryWithDOHMsg(method, doh.Resolver{URL: r.URL}, msg)
 			}
+			c.recordAttempt(resolver, attemptStart, err)
 
 			if err != nil || (trResp == nil && resp == nil) {
 				continue
@@ -578,7 +584,9 @@ func (c *Client) QueryParallel(host string, requestType uint16, resolvers []stri
 		wg.Add(1)
 		go func(resolver string, dnsdata *DNSData) {
 			defer wg.Done()
+			attemptStart := time.Now()
 			resp, err := dns.Exchange(msg.Copy(), resolver)
+			c.stats.record(resolver, time.Since(attemptStart), err)
 			if err != nil {
 				return
 			}
