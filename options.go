@@ -34,6 +34,40 @@ type Options struct {
 	ConnectionPoolThreads int
 	MaxPerCNAMEFollows    int
 	Proxy                 string
+
+	// ExitOnStatusCodes lists DNS rcodes that terminate the retry
+	// loop. When non-empty, only attempts whose rcode is in this list
+	// are considered definitive: the response is parsed into the
+	// returned DNSData and the loop exits. Attempts with any other
+	// rcode are treated like transport errors - the response is not
+	// parsed, DNSData is not mutated, and the loop continues with the
+	// next resolver.
+	//
+	// Common values:
+	//
+	//	[]int{dns.RcodeSuccess}                       // NOERROR only
+	//	[]int{dns.RcodeSuccess, dns.RcodeNameError}   // NOERROR or NXDOMAIN
+	//
+	// An empty/nil list preserves the legacy behavior: every attempt
+	// is parsed, DNSData.Raw accumulates across retries, and only
+	// RcodeSuccess breaks the loop.
+	ExitOnStatusCodes []int
+}
+
+// exitOnRcode reports whether rcode is one of the configured
+// terminating status codes. It returns true when no list is set so the
+// historical "break on success" path keeps working unchanged at the
+// call sites that gate on it.
+func (options *Options) exitOnRcode(rcode int) bool {
+	if len(options.ExitOnStatusCodes) == 0 {
+		return rcode == 0 // dns.RcodeSuccess
+	}
+	for _, c := range options.ExitOnStatusCodes {
+		if c == rcode {
+			return true
+		}
+	}
+	return false
 }
 
 // Returns a net.Addr of a UDP or TCP type depending on whats required

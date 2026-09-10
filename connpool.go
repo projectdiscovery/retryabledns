@@ -66,7 +66,7 @@ func (cp *ConnPool) Exchange(ctx context.Context, client *dns.Client, msg *dns.M
 func (cp *ConnPool) Close() {
 	cp.cancel()
 	for conn := range cp.items {
-		conn.Close()
+		_ = conn.Close()
 	}
 }
 
