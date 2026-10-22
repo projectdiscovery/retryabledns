@@ -317,3 +317,54 @@ func TestAXFRUsesProxy(t *testing.T) {
 	require.Equal(t, []string{"203.0.113.2"}, axfrData.DNSData[0].A)
 	requireProxied(t, socks, fr)
 }
+
+// TestTCPFallback ensures a truncated reply is retried over TCP, through the
+// proxy when one is set.
+func TestTCPFallback(t *testing.T) {
+	truncated := func(req *dns.Msg) *dns.Msg {
+		m := fixedResponse(dns.RcodeSuccess, []dns.RR{arecord(fakeHost, "203.0.113.10")})(req)
+		m.Truncated = true
+		return m
+	}
+
+	t.Run("direct", func(t *testing.T) {
+		fr := &fakeResolver{respond: truncated}
+		fr.startUDP(t, "127.0.0.1:0")
+		fr.startTCP(t, fr.addr)
+		client, err := NewWithOptions(Options{
+			BaseResolvers: []string{fr.Addr()},
+			MaxRetries:    1,
+			Timeout:       time.Second,
+		})
+		require.NoError(t, err)
+		client.TCPFallback = true
+
+		d, err := client.QueryMultiple(fakeHost, []uint16{dns.TypeA})
+		require.NoError(t, err)
+		require.Equal(t, []string{"203.0.113.10"}, d.A)
+		remotes := fr.Remotes()
+		require.Len(t, remotes, 2)
+		require.Equal(t, "udp", remotes[0].Network())
+		require.Equal(t, "tcp", remotes[1].Network(), "a truncated reply must be retried over TCP")
+	})
+
+	t.Run("proxy", func(t *testing.T) {
+		fr := &fakeResolver{respond: truncated}
+		fr.startTCP(t, "127.0.0.1:0")
+		socks := newSOCKSProxy(t)
+		client, err := NewWithOptions(Options{
+			BaseResolvers: []string{"tcp:" + fr.Addr()},
+			MaxRetries:    1,
+			Timeout:       time.Second,
+			Proxy:         socks.URL(),
+		})
+		require.NoError(t, err)
+		client.TCPFallback = true
+
+		d, err := client.QueryMultiple(fakeHost, []uint16{dns.TypeA})
+		require.NoError(t, err)
+		require.Equal(t, []string{"203.0.113.10"}, d.A)
+		require.EqualValues(t, 2, fr.Queries(), "a truncated reply must be retried once")
+		requireProxied(t, socks, fr)
+	})
+}
