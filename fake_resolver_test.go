@@ -1,6 +1,8 @@
 package retryabledns
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"io"
 	"net"
@@ -70,6 +72,26 @@ func newFakeResolverDual(t *testing.T, rcode int, answer ...dns.RR) *fakeResolve
 	fr.startUDP(t, "127.0.0.1:0")
 	fr.startTCP(t, fr.addr)
 	return fr
+}
+
+// newFakeDoTResolver starts a DNS-over-TLS server on 127.0.0.1. It
+// returns the server and a pool that trusts its self-signed certificate.
+func newFakeDoTResolver(t *testing.T, rcode int, answer ...dns.RR) (*fakeResolver, *x509.CertPool) {
+	t.Helper()
+	// Borrow httptest's built-in certificate, which covers 127.0.0.1.
+	ts := httptest.NewUnstartedServer(nil)
+	ts.StartTLS()
+	cert := ts.TLS.Certificates[0]
+	roots := x509.NewCertPool()
+	roots.AddCert(ts.Certificate())
+	ts.Close()
+
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}})
+	require.NoError(t, err)
+	fr := &fakeResolver{addr: ln.Addr().String(), respond: fixedResponse(rcode, answer)}
+	fr.tcp = &dns.Server{Listener: ln, Handler: dns.HandlerFunc(fr.handle)}
+	startServer(t, fr.tcp)
+	return fr, roots
 }
 
 // newFakeAXFRResolver starts a dual-stack server that handles the
