@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -29,6 +30,9 @@ type fakeResolver struct {
 	queries  atomic.Int64
 	respond  func(*dns.Msg) *dns.Msg
 	respAxfr func(*dns.Msg) []dns.RR // optional: when set, AXFR queries stream these records
+
+	mu      sync.Mutex
+	remotes []net.Addr // source address of every query, in arrival order
 }
 
 // newFakeResolver starts a UDP server that answers every query with
@@ -58,6 +62,16 @@ func newFakeResolverTCP(t *testing.T, rcode int, answer ...dns.RR) *fakeResolver
 	return fr
 }
 
+// newFakeResolverDual starts a server that answers over both UDP and
+// TCP on the same port, so a test can see which transport a query used.
+func newFakeResolverDual(t *testing.T, rcode int, answer ...dns.RR) *fakeResolver {
+	t.Helper()
+	fr := &fakeResolver{respond: fixedResponse(rcode, answer)}
+	fr.startUDP(t, "127.0.0.1:0")
+	fr.startTCP(t, fr.addr)
+	return fr
+}
+
 // newFakeAXFRResolver starts a dual-stack server that handles the
 // full AXFR flow: it answers the NS/A discovery probes over UDP with
 // empty NOERROR (so the client falls back to the originally
@@ -83,8 +97,17 @@ func newFakeAXFRResolver(t *testing.T, zoneRecords []dns.RR) *fakeResolver {
 func (fr *fakeResolver) Addr() string   { return fr.addr }
 func (fr *fakeResolver) Queries() int64 { return fr.queries.Load() }
 
+func (fr *fakeResolver) Remotes() []net.Addr {
+	fr.mu.Lock()
+	defer fr.mu.Unlock()
+	return append([]net.Addr(nil), fr.remotes...)
+}
+
 func (fr *fakeResolver) handle(w dns.ResponseWriter, r *dns.Msg) {
 	fr.queries.Add(1)
+	fr.mu.Lock()
+	fr.remotes = append(fr.remotes, w.RemoteAddr())
+	fr.mu.Unlock()
 	// AXFR queries get streamed via dns.Transfer when configured.
 	if fr.respAxfr != nil && len(r.Question) > 0 && r.Question[0].Qtype == dns.TypeAXFR {
 		tr := new(dns.Transfer)
