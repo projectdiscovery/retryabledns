@@ -49,13 +49,16 @@ type Client struct {
 	options      Options
 	serversIndex uint32
 	TCPFallback  bool
-	udpClient    *dns.Client
-	udpConnPool  mapsutil.SyncLockMap[string, *ConnPool]
-	tcpClient    *dns.Client
-	dohClient    *doh.Client
-	dotClient    *dns.Client
-	proxyDialer  proxy.ContextDialer
-	knownHosts   map[string][]string
+	// udpClient, tcpClient and dotClient reach resolvers only through
+	// exchange and dial, so every connection goes through the proxy when
+	// Proxy is set.
+	udpClient   *dns.Client
+	udpConnPool mapsutil.SyncLockMap[string, *ConnPool]
+	tcpClient   *dns.Client
+	dohClient   *doh.Client
+	dotClient   *dns.Client
+	proxyDialer proxy.ContextDialer
+	knownHosts  map[string][]string
 }
 
 // New creates a new dns client
@@ -587,7 +590,10 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 	return &dnsdata, err
 }
 
-// QueryParallel sends a provided dns request to multiple resolvers in parallel
+// QueryParallel sends a provided dns request to multiple resolvers in parallel.
+// With both LocalAddrIP and LocalAddrPort set, queries that dial their own
+// connection compete for that local port, so all but one may fail and come
+// back empty.
 func (c *Client) QueryParallel(host string, requestType uint16, resolvers []string) ([]*DNSData, error) {
 	msg := dns.Msg{}
 	msg.SetQuestion(dns.CanonicalName(host), requestType)
@@ -601,7 +607,7 @@ func (c *Client) QueryParallel(host string, requestType uint16, resolvers []stri
 		wg.Add(1)
 		go func(resolver string, dnsdata *DNSData) {
 			defer wg.Done()
-			resp, err := dns.Exchange(msg.Copy(), resolver)
+			resp, err := c.query(msg.Copy(), parseResolver(resolver))
 			if err != nil {
 				return
 			}
@@ -660,14 +666,12 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*Trac
 		for _, d := range dnsdatas {
 			// Add ns records as new resolvers
 			for _, ns := range d.NS {
-				ips, err := net.LookupIP(ns)
+				nsData, err := c.A(ns)
 				if err != nil {
 					continue
 				}
-				for _, ip := range ips {
-					if ip.To4() != nil {
-						newNSResolvers = append(newNSResolvers, net.JoinHostPort(ip.String(), "53"))
-					}
+				for _, ip := range nsData.A {
+					newNSResolvers = append(newNSResolvers, net.JoinHostPort(ip, "53"))
 				}
 			}
 			// Follow CNAME - should happen at the final step of the trace

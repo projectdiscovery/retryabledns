@@ -368,3 +368,64 @@ func TestTCPFallback(t *testing.T) {
 		requireProxied(t, socks, fr)
 	})
 }
+
+// TestQueryParallelUsesProxy ensures QueryParallel sends its queries through
+// the proxy.
+func TestQueryParallelUsesProxy(t *testing.T) {
+	fr := newFakeResolverDual(t, dns.RcodeSuccess, arecord(fakeHost, "203.0.113.10"))
+	socks := newSOCKSProxy(t)
+	client, err := NewWithOptions(Options{
+		BaseResolvers: []string{"127.0.0.1:53"},
+		MaxRetries:    1,
+		Timeout:       time.Second,
+		Proxy:         socks.URL(),
+	})
+	require.NoError(t, err)
+
+	dnsdatas, err := client.QueryParallel(fakeHost, dns.TypeA, []string{fr.Addr()})
+	require.NoError(t, err)
+	require.Len(t, dnsdatas, 1)
+	require.Equal(t, []string{"203.0.113.10"}, dnsdatas[0].A)
+	requireProxied(t, socks, fr)
+}
+
+// TestTraceUsesProxy ensures Trace queries the root servers and resolves name
+// server addresses through the proxy.
+func TestTraceUsesProxy(t *testing.T) {
+	const nsName = "ns1.trace.test."
+	fr := &fakeResolver{respond: func(req *dns.Msg) *dns.Msg {
+		m := &dns.Msg{}
+		m.SetReply(req)
+		if req.Question[0].Name == nsName {
+			m.Answer = []dns.RR{arecord(nsName, "127.0.0.1")}
+			return m
+		}
+		// The trace reads name servers from the answer section only.
+		m.Answer = []dns.RR{&dns.NS{
+			Hdr: dns.RR_Header{Name: req.Question[0].Name, Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 60},
+			Ns:  nsName,
+		}}
+		return m
+	}}
+	fr.startUDP(t, "127.0.0.1:0")
+	fr.startTCP(t, fr.addr)
+	roots := RootDNSServersIPv4
+	RootDNSServersIPv4 = []string{fr.Addr()}
+	t.Cleanup(func() { RootDNSServersIPv4 = roots })
+
+	socks := newSOCKSProxy(t)
+	client, err := NewWithOptions(Options{
+		BaseResolvers: []string{fr.Addr()},
+		MaxRetries:    1,
+		Timeout:       time.Second,
+		Proxy:         socks.URL(),
+	})
+	require.NoError(t, err)
+
+	// A max recursion of 2 runs one step: query the root, then resolve the
+	// name server it returned.
+	_, err = client.Trace(fakeHost, dns.TypeA, 2)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, fr.Queries(), "root query plus the name server lookup")
+	requireProxied(t, socks, fr)
+}
