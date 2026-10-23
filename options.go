@@ -4,12 +4,15 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"time"
 )
 
 var (
 	ErrMaxRetriesZero = errors.New("retries must be at least 1")
 	ErrResolversEmpty = errors.New("resolvers list must not be empty")
+
+	ErrProxySchemeUnsupported = errors.New("proxy scheme must be socks5 or socks5h")
 
 	BaseResolvers = []string{
 		"1.1.1.1:53",
@@ -33,7 +36,14 @@ type Options struct {
 	LocalAddrPort         uint16
 	ConnectionPoolThreads int
 	MaxPerCNAMEFollows    int
-	Proxy                 string
+
+	// Proxy is the URL of a SOCKS5 proxy that queries go through, for
+	// example "socks5://user:password@127.0.0.1:1080". The credentials
+	// are optional. Only the socks5 and socks5h schemes are accepted;
+	// any other scheme, including http and https, makes Validate fail
+	// with ErrProxySchemeUnsupported. When set, UDP resolvers are
+	// queried over TCP. An empty value disables the proxy.
+	Proxy string
 
 	// ExitOnStatusCodes lists DNS rcodes that terminate the retry
 	// loop. When non-empty, only attempts whose rcode is in this list
@@ -121,5 +131,27 @@ func (options *Options) Validate() error {
 	if len(options.BaseResolvers) == 0 {
 		return ErrResolversEmpty
 	}
-	return nil
+
+	return options.validateProxy()
+}
+
+// validateProxy checks that Proxy, when set, is a SOCKS5 proxy URL.
+func (options *Options) validateProxy() error {
+	if options.Proxy == "" {
+		return nil
+	}
+	proxyURL, err := url.Parse(options.Proxy)
+	if err != nil {
+		// drop the raw URL that url.Error carries, it may hold credentials
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
+		return fmt.Errorf("invalid proxy URL: %w", err)
+	}
+	switch proxyURL.Scheme {
+	case "socks5", "socks5h":
+		return nil
+	}
+	return fmt.Errorf("%w: got %q", ErrProxySchemeUnsupported, proxyURL.Scheme)
 }
