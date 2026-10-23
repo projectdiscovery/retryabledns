@@ -83,20 +83,6 @@ func NewWithOptions(options Options) (*Client, error) {
 		doh.WithProxy(options.Proxy), // no-op if empty
 	)
 
-	// If proxy is specified, force TCP for all resolvers
-	if options.Proxy != "" {
-		for i, resolver := range parsedBaseResolvers {
-			if networkResolver, ok := resolver.(*NetworkResolver); ok && networkResolver.Protocol == UDP {
-				// Convert UDP resolvers to TCP when proxy is specified
-				parsedBaseResolvers[i] = &NetworkResolver{
-					Protocol: TCP,
-					Host:     networkResolver.Host,
-					Port:     networkResolver.Port,
-				}
-			}
-		}
-	}
-
 	udpDialer := &net.Dialer{LocalAddr: options.GetLocalAddr(UDP)}
 	tcpDialer := &net.Dialer{LocalAddr: options.GetLocalAddr(TCP)}
 	dotDialer := &net.Dialer{LocalAddr: options.GetLocalAddr(TCP)}
@@ -262,6 +248,10 @@ func (c *Client) exchange(msg *dns.Msg, protocol Protocol, addr string) (*dns.Ms
 		resp *dns.Msg
 		err  error
 	)
+	// SOCKS5 relays only TCP, so with a proxy every UDP query goes over TCP.
+	if c.proxyDialer != nil && protocol == UDP {
+		protocol = TCP
+	}
 	switch protocol {
 	case UDP:
 		// Pools exist only for BaseResolvers, so any other resolver gets a
