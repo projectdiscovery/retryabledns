@@ -141,7 +141,9 @@ func NewWithOptions(options Options) (*Client, error) {
 		client.proxyDialer = contextDialer
 	}
 
-	if options.ConnectionPoolThreads > 1 {
+	// With a proxy, every query goes over TCP through it, so UDP pools would
+	// only dial resolvers directly.
+	if options.ConnectionPoolThreads > 1 && client.proxyDialer == nil {
 		client.udpConnPool = mapsutil.SyncLockMap[string, *ConnPool]{
 			Map: make(mapsutil.Map[string, *ConnPool]),
 		}
