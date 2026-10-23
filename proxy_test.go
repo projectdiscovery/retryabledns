@@ -205,8 +205,8 @@ func requireProxied(t *testing.T, p *socksProxy, fr *fakeResolver) {
 }
 
 // TestUDPResolversUseProxy ensures UDP resolvers go through the proxy over
-// TCP, whether they come from BaseResolvers or are passed per call, and even
-// when a pool exists for their address.
+// TCP, whether they come from BaseResolvers or are passed per call, and
+// whether or not ConnectionPoolThreads asks for pools.
 func TestUDPResolversUseProxy(t *testing.T) {
 	for _, threads := range []int{0, 2} {
 		t.Run(fmt.Sprintf("ConnectionPoolThreads=%d", threads), func(t *testing.T) {
@@ -428,4 +428,20 @@ func TestTraceUsesProxy(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 2, fr.Queries(), "root query plus the name server lookup")
 	requireProxied(t, socks, fr)
+}
+
+// TestNoPoolsWithProxy ensures NewWithOptions opens no direct connections when
+// Proxy is set: UDP pools would dial each resolver, resolving its hostname,
+// outside the proxy, and queries never use them.
+func TestNoPoolsWithProxy(t *testing.T) {
+	client, err := NewWithOptions(Options{
+		// .invalid never resolves (RFC 6761), so a direct lookup fails.
+		BaseResolvers:         []string{"resolver.invalid:53"},
+		MaxRetries:            1,
+		ConnectionPoolThreads: 2,
+		Proxy:                 newSOCKSProxy(t).URL(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(client.Close)
+	require.Empty(t, client.udpConnPool.Map)
 }
