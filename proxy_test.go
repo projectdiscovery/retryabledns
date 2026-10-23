@@ -293,3 +293,27 @@ func TestDoTHandshakeHonorsTimeout(t *testing.T) {
 		t.Fatalf("query still blocked after %s with Timeout %s", 10*timeout, timeout)
 	}
 }
+
+// TestAXFRUsesProxy ensures zone transfers go through the proxy, like the NS
+// and A lookups that precede them.
+func TestAXFRUsesProxy(t *testing.T) {
+	fr := newFakeAXFRResolver(t, []dns.RR{
+		soarecord("zonetransfer.test"),
+		arecord("host.zonetransfer.test", "203.0.113.2"),
+		soarecord("zonetransfer.test"),
+	})
+	socks := newSOCKSProxy(t)
+	client, err := NewWithOptions(Options{
+		BaseResolvers: []string{fr.Addr()},
+		MaxRetries:    1,
+		Timeout:       time.Second,
+		Proxy:         socks.URL(),
+	})
+	require.NoError(t, err)
+
+	axfrData, err := client.AXFR("zonetransfer.test")
+	require.NoError(t, err)
+	require.Len(t, axfrData.DNSData, 1)
+	require.Equal(t, []string{"203.0.113.2"}, axfrData.DNSData[0].A)
+	requireProxied(t, socks, fr)
+}

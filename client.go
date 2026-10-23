@@ -245,43 +245,52 @@ func (c *Client) query(msg *dns.Msg, resolver Resolver) (*dns.Msg, error) {
 // exchange sends msg to the resolver at addr over protocol. Any connection it
 // opens is closed before it returns.
 func (c *Client) exchange(msg *dns.Msg, protocol Protocol, addr string) (*dns.Msg, error) {
-	// SOCKS5 relays only TCP, so with a proxy every UDP query goes over TCP.
-	if c.proxyDialer != nil && protocol == UDP {
-		protocol = TCP
-	}
-	var client *dns.Client
-	switch protocol {
-	case UDP:
-		// Pools exist only for BaseResolvers, so any other resolver gets a
-		// connection of its own.
-		if pool, ok := c.udpConnPool.Get(addr); ok {
-			resp, _, err := pool.Exchange(context.TODO(), c.udpClient, msg)
-			return resp, err
-		}
-		client = c.udpClient
-	case TCP:
-		client = c.tcpClient
-	case DOT:
-		client = c.dotClient
-	default:
+	client := c.clientFor(protocol)
+	if client == nil {
 		return nil, fmt.Errorf("unsupported protocol %q", protocol)
 	}
-
-	var (
-		conn *dns.Conn
-		err  error
-	)
-	if c.proxyDialer != nil {
-		conn, err = c.dialProxy(client, addr)
-	} else {
-		conn, err = client.Dial(addr)
+	// Pools exist only for BaseResolvers, so any other resolver gets a
+	// connection of its own.
+	if client == c.udpClient {
+		if pool, ok := c.udpConnPool.Get(addr); ok {
+			resp, _, err := pool.Exchange(context.TODO(), client, msg)
+			return resp, err
+		}
 	}
+	conn, err := c.dial(client, addr)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = conn.Close() }()
 	resp, _, err := client.ExchangeWithConn(msg, conn)
 	return resp, err
+}
+
+// clientFor returns the client that queries a resolver over protocol, or nil
+// if the protocol is unsupported. SOCKS5 relays only TCP, so with a proxy UDP
+// resolvers are queried over TCP.
+func (c *Client) clientFor(protocol Protocol) *dns.Client {
+	if c.proxyDialer != nil && protocol == UDP {
+		protocol = TCP
+	}
+	switch protocol {
+	case UDP:
+		return c.udpClient
+	case TCP:
+		return c.tcpClient
+	case DOT:
+		return c.dotClient
+	}
+	return nil
+}
+
+// dial opens a connection for client to the resolver at addr, through the
+// proxy when one is set.
+func (c *Client) dial(client *dns.Client, addr string) (*dns.Conn, error) {
+	if c.proxyDialer != nil {
+		return c.dialProxy(client, addr)
+	}
+	return client.Dial(addr)
 }
 
 // dialProxy does what client.Dial does, but through the proxy: it opens a TCP
@@ -486,17 +495,13 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 				resolver = c.resolvers[index%uint32(len(c.resolvers))]
 			}
 			if r, ok := resolver.(*NetworkResolver); ok && requestType == dns.TypeAXFR {
-				var dnsconn *dns.Conn
-				switch r.Protocol {
-				case TCP:
-					dnsconn, err = c.tcpClient.Dial(resolver.String())
-				case UDP:
-					dnsconn, err = c.udpClient.Dial(resolver.String())
-				case DOT:
-					dnsconn, err = c.dotClient.Dial(resolver.String())
-				default:
-					dnsconn, err = c.tcpClient.Dial(resolver.String())
+				client := c.clientFor(r.Protocol)
+				if client == nil {
+					// zone transfers run over TCP, so it is the safe default
+					client = c.tcpClient
 				}
+				var dnsconn *dns.Conn
+				dnsconn, err = c.dial(client, resolver.String())
 				if err == nil {
 					activeConn = dnsconn
 					dnsTransfer := &dns.Transfer{Conn: dnsconn}
