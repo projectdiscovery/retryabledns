@@ -207,66 +207,11 @@ func (c *Client) Resolve(host string) (*DNSData, error) {
 func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 	var resp *dns.Msg
 	var err error
-	// activeConn holds the proxied connection dialed for the current attempt.
-	// It is closed at the top of the next iteration (and via defer on return) so
-	// that retries cannot accumulate open connections: a deferred Close inside
-	// the loop only fires when Do returns, leaking one socket per retry.
-	var activeConn *dns.Conn
-	defer func() {
-		if activeConn != nil {
-			_ = activeConn.Close()
-		}
-	}()
 	for i := 0; i < c.options.MaxRetries; i++ {
-		if activeConn != nil {
-			_ = activeConn.Close()
-			activeConn = nil
-		}
 		index := atomic.AddUint32(&c.serversIndex, 1)
 		resolver := c.resolvers[index%uint32(len(c.resolvers))]
 
-		switch r := resolver.(type) {
-		case *NetworkResolver:
-			switch r.Protocol {
-			case TCP:
-				if c.proxyDialer != nil {
-					var tcpConn *dns.Conn
-					tcpConn, err = c.dialProxy("tcp", resolver.String())
-					if err != nil {
-						break
-					}
-					activeConn = tcpConn
-					resp, _, err = c.tcpClient.ExchangeWithConn(msg, tcpConn)
-				} else {
-					resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
-				}
-			case UDP:
-				if c.options.ConnectionPoolThreads > 1 {
-					if udpConnPool, ok := c.udpConnPool.Get(resolver.String()); ok {
-						resp, _, err = udpConnPool.Exchange(context.TODO(), c.udpClient, msg)
-					}
-				} else if c.proxyDialer != nil {
-					var udpConn *dns.Conn
-					udpConn, err = c.dialProxy("udp", resolver.String())
-					if err != nil {
-						break
-					}
-					activeConn = udpConn
-					resp, _, err = c.udpClient.ExchangeWithConn(msg, udpConn)
-				} else {
-					resp, _, err = c.udpClient.Exchange(msg, resolver.String())
-				}
-			case DOT:
-				resp, _, err = c.dotClient.Exchange(msg, resolver.String())
-			}
-		case *DohResolver:
-			method := doh.MethodPost
-			if r.Protocol == GET {
-				method = doh.MethodGet
-			}
-			resp, err = c.dohClient.QueryWithDOHMsg(method, doh.Resolver{URL: r.URL}, msg)
-		}
-
+		resp, err = c.query(msg, resolver)
 		if err != nil || resp == nil {
 			continue
 		}
@@ -290,6 +235,60 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 		return resp, errors.Join(ErrRetriesExceeded, err)
 	}
 	return resp, ErrRetriesExceeded
+}
+
+// query sends msg to resolver and returns the reply. It either sends the query
+// or returns an error, so a retry loop can't mistake a skipped attempt for an
+// empty answer.
+func (c *Client) query(msg *dns.Msg, resolver Resolver) (*dns.Msg, error) {
+	switch r := resolver.(type) {
+	case *NetworkResolver:
+		return c.exchange(msg, r.Protocol, r.String())
+	case *DohResolver:
+		method := doh.MethodPost
+		if r.Protocol == GET {
+			method = doh.MethodGet
+		}
+		return c.dohClient.QueryWithDOHMsg(method, doh.Resolver{URL: r.URL}, msg)
+	default:
+		return nil, fmt.Errorf("unsupported resolver type %T", resolver)
+	}
+}
+
+// exchange sends msg to the resolver at addr over protocol. Any connection it
+// opens is closed before it returns.
+func (c *Client) exchange(msg *dns.Msg, protocol Protocol, addr string) (*dns.Msg, error) {
+	var (
+		resp *dns.Msg
+		err  error
+	)
+	switch protocol {
+	case UDP:
+		// Pools exist only for BaseResolvers, so any other resolver gets a
+		// connection of its own.
+		if pool, ok := c.udpConnPool.Get(addr); ok {
+			resp, _, err = pool.Exchange(context.TODO(), c.udpClient, msg)
+		} else {
+			resp, _, err = c.udpClient.Exchange(msg, addr)
+		}
+	case TCP:
+		if c.proxyDialer != nil {
+			var conn *dns.Conn
+			conn, err = c.dialProxy("tcp", addr)
+			if err != nil {
+				break
+			}
+			defer func() { _ = conn.Close() }()
+			resp, _, err = c.tcpClient.ExchangeWithConn(msg, conn)
+		} else {
+			resp, _, err = c.tcpClient.Exchange(msg, addr)
+		}
+	case DOT:
+		resp, _, err = c.dotClient.Exchange(msg, addr)
+	default:
+		err = fmt.Errorf("unsupported protocol %q", protocol)
+	}
+	return resp, err
 }
 
 // dialProxy opens a connection to addr through the proxy. Timeout bounds the
@@ -389,11 +388,11 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 		hasResolver = resolver != nil
 		dnsdata     DNSData
 		err         error
-		// activeConn holds the connection dialed for the current attempt (proxy
-		// or AXFR). It is closed at the top of the next iteration and via defer
-		// on return, capping concurrent connections at one. A deferred Close
-		// inside the loop only fires when queryMultiple returns, so it would
-		// leak one socket per retry and per request type.
+		// activeConn holds the AXFR connection dialed for the current attempt.
+		// The transfer is read further down the loop body, so the connection
+		// is closed at the top of the next iteration and via defer on return.
+		// A deferred Close inside the loop only fires when queryMultiple
+		// returns, so it would leak one socket per retry and per request type.
 		activeConn *dns.Conn
 	)
 	defer func() {
@@ -475,58 +474,25 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 			if !hasResolver {
 				resolver = c.resolvers[index%uint32(len(c.resolvers))]
 			}
-			switch r := resolver.(type) {
-			case *NetworkResolver:
-				if requestType == dns.TypeAXFR {
-					var dnsconn *dns.Conn
-					switch r.Protocol {
-					case TCP:
-						dnsconn, err = c.tcpClient.Dial(resolver.String())
-					case UDP:
-						dnsconn, err = c.udpClient.Dial(resolver.String())
-					case DOT:
-						dnsconn, err = c.dotClient.Dial(resolver.String())
-					default:
-						dnsconn, err = c.tcpClient.Dial(resolver.String())
-					}
-					if err != nil {
-						break
-					}
+			if r, ok := resolver.(*NetworkResolver); ok && requestType == dns.TypeAXFR {
+				var dnsconn *dns.Conn
+				switch r.Protocol {
+				case TCP:
+					dnsconn, err = c.tcpClient.Dial(resolver.String())
+				case UDP:
+					dnsconn, err = c.udpClient.Dial(resolver.String())
+				case DOT:
+					dnsconn, err = c.dotClient.Dial(resolver.String())
+				default:
+					dnsconn, err = c.tcpClient.Dial(resolver.String())
+				}
+				if err == nil {
 					activeConn = dnsconn
 					dnsTransfer := &dns.Transfer{Conn: dnsconn}
 					trResp, err = dnsTransfer.In(msg, resolver.String())
-				} else {
-					switch r.Protocol {
-					case TCP:
-						if c.proxyDialer != nil {
-							var tcpConn *dns.Conn
-							tcpConn, err = c.dialProxy("tcp", resolver.String())
-							if err != nil {
-								break
-							}
-							activeConn = tcpConn
-							resp, _, err = c.tcpClient.ExchangeWithConn(msg, tcpConn)
-						} else {
-							resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
-						}
-					case UDP:
-						if c.options.ConnectionPoolThreads > 1 {
-							if udpConnPool, ok := c.udpConnPool.Get(resolver.String()); ok {
-								resp, _, err = udpConnPool.Exchange(context.TODO(), c.udpClient, msg)
-							}
-						} else {
-							resp, _, err = c.udpClient.Exchange(msg, resolver.String())
-						}
-					case DOT:
-						resp, _, err = c.dotClient.Exchange(msg, resolver.String())
-					}
 				}
-			case *DohResolver:
-				method := doh.MethodPost
-				if r.Protocol == GET {
-					method = doh.MethodGet
-				}
-				resp, err = c.dohClient.QueryWithDOHMsg(method, doh.Resolver{URL: r.URL}, msg)
+			} else {
+				resp, err = c.query(msg, resolver)
 			}
 
 			if err != nil || (trResp == nil && resp == nil) {
