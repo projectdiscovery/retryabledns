@@ -286,6 +286,12 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 	if len(c.options.ExitOnStatusCodes) > 0 && resp != nil && !c.options.exitOnRcode(resp.Rcode) {
 		resp = nil
 	}
+	// Keep the last attempt's error so callers can tell, for example, a
+	// proxy failure from a resolver failure. With no error (the last
+	// attempt got a non-definitive response) return the bare sentinel.
+	if err != nil {
+		return resp, errors.Join(ErrRetriesExceeded, err)
+	}
 	return resp, ErrRetriesExceeded
 }
 
