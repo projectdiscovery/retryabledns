@@ -3,6 +3,7 @@ package retryabledns
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/gob"
 	"encoding/json"
 	"errors"
@@ -244,56 +245,76 @@ func (c *Client) query(msg *dns.Msg, resolver Resolver) (*dns.Msg, error) {
 // exchange sends msg to the resolver at addr over protocol. Any connection it
 // opens is closed before it returns.
 func (c *Client) exchange(msg *dns.Msg, protocol Protocol, addr string) (*dns.Msg, error) {
-	var (
-		resp *dns.Msg
-		err  error
-	)
 	// SOCKS5 relays only TCP, so with a proxy every UDP query goes over TCP.
 	if c.proxyDialer != nil && protocol == UDP {
 		protocol = TCP
 	}
+	var client *dns.Client
 	switch protocol {
 	case UDP:
 		// Pools exist only for BaseResolvers, so any other resolver gets a
 		// connection of its own.
 		if pool, ok := c.udpConnPool.Get(addr); ok {
-			resp, _, err = pool.Exchange(context.TODO(), c.udpClient, msg)
-		} else {
-			resp, _, err = c.udpClient.Exchange(msg, addr)
+			resp, _, err := pool.Exchange(context.TODO(), c.udpClient, msg)
+			return resp, err
 		}
+		client = c.udpClient
 	case TCP:
-		if c.proxyDialer != nil {
-			var conn *dns.Conn
-			conn, err = c.dialProxy("tcp", addr)
-			if err != nil {
-				break
-			}
-			defer func() { _ = conn.Close() }()
-			resp, _, err = c.tcpClient.ExchangeWithConn(msg, conn)
-		} else {
-			resp, _, err = c.tcpClient.Exchange(msg, addr)
-		}
+		client = c.tcpClient
 	case DOT:
-		resp, _, err = c.dotClient.Exchange(msg, addr)
+		client = c.dotClient
 	default:
-		err = fmt.Errorf("unsupported protocol %q", protocol)
+		return nil, fmt.Errorf("unsupported protocol %q", protocol)
 	}
+
+	var (
+		conn *dns.Conn
+		err  error
+	)
+	if c.proxyDialer != nil {
+		conn, err = c.dialProxy(client, addr)
+	} else {
+		conn, err = client.Dial(addr)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = conn.Close() }()
+	resp, _, err := client.ExchangeWithConn(msg, conn)
 	return resp, err
 }
 
-// dialProxy opens a connection to addr through the proxy. Timeout bounds the
-// whole setup, including the proxy handshake, which otherwise waits forever on
-// a proxy that accepts the connection but never answers.
-func (c *Client) dialProxy(network, addr string) (*dns.Conn, error) {
+// dialProxy does what client.Dial does, but through the proxy: it opens a TCP
+// connection to addr and, for DoT, starts TLS on it. Timeout bounds the whole
+// setup, including the proxy and TLS handshakes, which otherwise wait forever
+// on a peer that accepts the connection but never answers.
+func (c *Client) dialProxy(client *dns.Client, addr string) (*dns.Conn, error) {
 	ctx := context.Background()
 	if c.options.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, c.options.Timeout)
 		defer cancel()
 	}
-	conn, err := c.proxyDialer.DialContext(ctx, network, addr)
+	conn, err := c.proxyDialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, err
+	}
+	if client.Net == "tcp-tls" {
+		// Like tls.Dialer, verify the certificate against the host in addr
+		// unless the client's config names a server.
+		config := client.TLSConfig.Clone()
+		if config == nil {
+			config = &tls.Config{}
+		}
+		if config.ServerName == "" {
+			config.ServerName, _, _ = net.SplitHostPort(addr)
+		}
+		tlsConn := tls.Client(conn, config)
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			_ = conn.Close()
+			return nil, err
+		}
+		conn = tlsConn
 	}
 	return &dns.Conn{Conn: conn}, nil
 }

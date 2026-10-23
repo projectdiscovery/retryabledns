@@ -1,6 +1,7 @@
 package retryabledns
 
 import (
+	"crypto/tls"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -237,5 +238,58 @@ func TestUDPResolversUseProxy(t *testing.T) {
 			requireProxied(t, socks, fr)
 			require.EqualValues(t, 3, fr.Queries())
 		})
+	}
+}
+
+// TestDoTUsesProxy ensures DoT queries go through the proxy.
+func TestDoTUsesProxy(t *testing.T) {
+	fr, roots := newFakeDoTResolver(t, dns.RcodeSuccess, arecord(fakeHost, "203.0.113.10"))
+	socks := newSOCKSProxy(t)
+	client, err := NewWithOptions(Options{
+		BaseResolvers: []string{"dot:" + fr.Addr()},
+		MaxRetries:    1,
+		Timeout:       time.Second,
+		Proxy:         socks.URL(),
+	})
+	require.NoError(t, err)
+	client.dotClient.TLSConfig = &tls.Config{RootCAs: roots}
+
+	d, err := client.QueryMultiple(fakeHost, []uint16{dns.TypeA})
+	require.NoError(t, err)
+	require.Equal(t, []string{"203.0.113.10"}, d.A)
+
+	msg := &dns.Msg{}
+	msg.SetQuestion(dns.Fqdn(fakeHost), dns.TypeA)
+	_, err = client.Do(msg)
+	require.NoError(t, err)
+
+	requireProxied(t, socks, fr)
+	require.EqualValues(t, 2, fr.Queries())
+}
+
+// TestDoTHandshakeHonorsTimeout ensures Timeout bounds the TLS handshake on a
+// proxied DoT connection, so a resolver that never answers can't block a query.
+func TestDoTHandshakeHonorsTimeout(t *testing.T) {
+	const timeout = 500 * time.Millisecond
+	client, err := NewWithOptions(Options{
+		// stalledProxy also stands in for a DoT resolver that accepts the
+		// connection but never answers the TLS handshake.
+		BaseResolvers: []string{"dot:" + stalledProxy(t)},
+		MaxRetries:    1,
+		Timeout:       timeout,
+		Proxy:         newSOCKSProxy(t).URL(),
+	})
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.QueryMultiple(fakeHost, []uint16{dns.TypeA})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		require.Error(t, err)
+	case <-time.After(10 * timeout):
+		t.Fatalf("query still blocked after %s with Timeout %s", 10*timeout, timeout)
 	}
 }
