@@ -53,9 +53,7 @@ type Client struct {
 	tcpClient    *dns.Client
 	dohClient    *doh.Client
 	dotClient    *dns.Client
-	udpProxy     proxy.Dialer
-	tcpProxy     proxy.Dialer
-	dotProxy     proxy.Dialer
+	proxyDialer  proxy.ContextDialer
 	knownHosts   map[string][]string
 }
 
@@ -139,22 +137,18 @@ func NewWithOptions(options Options) (*Client, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid proxy URL: %v", err)
 		}
-		proxyDialer, err := proxy.FromURL(proxyURL, udpDialer)
+		// The hop to a SOCKS5 proxy is always TCP, so one dialer serves every
+		// resolver protocol.
+		proxyDialer, err := proxy.FromURL(proxyURL, tcpDialer)
 		if err != nil {
 			return nil, fmt.Errorf("error creating proxy dialer: %v", err)
 		}
-		tcpProxyDialer, err := proxy.FromURL(proxyURL, tcpDialer)
-		if err != nil {
-			return nil, fmt.Errorf("error creating proxy dialer: %v", err)
+		// DialContext is what lets Timeout bound the proxy handshake.
+		contextDialer, ok := proxyDialer.(proxy.ContextDialer)
+		if !ok {
+			return nil, fmt.Errorf("proxy dialer for scheme %q does not support timeouts", proxyURL.Scheme)
 		}
-		dotProxyDialer, err := proxy.FromURL(proxyURL, dotDialer)
-		if err != nil {
-			return nil, fmt.Errorf("error creating proxy dialer: %v", err)
-		}
-
-		client.udpProxy = proxyDialer
-		client.tcpProxy = tcpProxyDialer
-		client.dotProxy = dotProxyDialer
+		client.proxyDialer = contextDialer
 	}
 
 	if options.ConnectionPoolThreads > 1 {
@@ -235,9 +229,9 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 		case *NetworkResolver:
 			switch r.Protocol {
 			case TCP:
-				if c.tcpProxy != nil {
+				if c.proxyDialer != nil {
 					var tcpConn *dns.Conn
-					tcpConn, err = c.dialWithProxy(c.tcpProxy, "tcp", resolver.String())
+					tcpConn, err = c.dialProxy("tcp", resolver.String())
 					if err != nil {
 						break
 					}
@@ -251,9 +245,9 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 					if udpConnPool, ok := c.udpConnPool.Get(resolver.String()); ok {
 						resp, _, err = udpConnPool.Exchange(context.TODO(), c.udpClient, msg)
 					}
-				} else if c.udpProxy != nil {
+				} else if c.proxyDialer != nil {
 					var udpConn *dns.Conn
-					udpConn, err = c.dialWithProxy(c.udpProxy, "udp", resolver.String())
+					udpConn, err = c.dialProxy("udp", resolver.String())
 					if err != nil {
 						break
 					}
@@ -298,8 +292,17 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 	return resp, ErrRetriesExceeded
 }
 
-func (c *Client) dialWithProxy(dialer proxy.Dialer, network, addr string) (*dns.Conn, error) {
-	conn, err := dialer.Dial(network, addr)
+// dialProxy opens a connection to addr through the proxy. Timeout bounds the
+// whole setup, including the proxy handshake, which otherwise waits forever on
+// a proxy that accepts the connection but never answers.
+func (c *Client) dialProxy(network, addr string) (*dns.Conn, error) {
+	ctx := context.Background()
+	if c.options.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.options.Timeout)
+		defer cancel()
+	}
+	conn, err := c.proxyDialer.DialContext(ctx, network, addr)
 	if err != nil {
 		return nil, err
 	}
@@ -495,9 +498,9 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 				} else {
 					switch r.Protocol {
 					case TCP:
-						if c.tcpProxy != nil {
+						if c.proxyDialer != nil {
 							var tcpConn *dns.Conn
-							tcpConn, err = c.dialWithProxy(c.tcpProxy, "tcp", resolver.String())
+							tcpConn, err = c.dialProxy("tcp", resolver.String())
 							if err != nil {
 								break
 							}

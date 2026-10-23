@@ -1,6 +1,7 @@
 package retryabledns
 
 import (
+	"context"
 	"io"
 	"net"
 	"sync"
@@ -31,6 +32,10 @@ func (d *countingDialer) Dial(network, addr string) (net.Conn, error) {
 	}
 	d.mu.Unlock()
 	return &fakeConn{d: d}, nil
+}
+
+func (d *countingDialer) DialContext(_ context.Context, network, addr string) (net.Conn, error) {
+	return d.Dial(network, addr)
 }
 
 func (d *countingDialer) snapshot() (live, total, maxConcurr int) {
@@ -64,7 +69,7 @@ func (c *fakeConn) SetDeadline(t time.Time) error      { return nil }
 func (c *fakeConn) SetReadDeadline(t time.Time) error  { return nil }
 func (c *fakeConn) SetWriteDeadline(t time.Time) error { return nil }
 
-func newProxyTestClient(t *testing.T, d proxy.Dialer, maxRetries int) *Client {
+func newProxyTestClient(t *testing.T, d proxy.ContextDialer, maxRetries int) *Client {
 	t.Helper()
 	client, err := NewWithOptions(Options{
 		BaseResolvers: []string{"tcp:127.0.0.1:53"},
@@ -73,7 +78,7 @@ func newProxyTestClient(t *testing.T, d proxy.Dialer, maxRetries int) *Client {
 	})
 	require.NoError(t, err)
 	// inject the proxy dialer so the proxied TCP paths are taken
-	client.tcpProxy = d
+	client.proxyDialer = d
 	client.resolvers = []Resolver{&NetworkResolver{Protocol: TCP, Host: "127.0.0.1", Port: "53"}}
 	return client
 }
