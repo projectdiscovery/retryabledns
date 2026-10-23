@@ -181,7 +181,10 @@ func NewWithOptions(options Options) (*Client, error) {
 	return &client, nil
 }
 
-// ResolveWithSyscall attempts to resolve the host through system calls
+// ResolveWithSyscall resolves host to A and AAAA records using the operating
+// system's resolver. It ignores the client's options, including Proxy,
+// BaseResolvers, and Timeout, so its lookups never go through the proxy. Call
+// Resolve to apply them.
 func (c *Client) ResolveWithSyscall(host string) (*DNSData, error) {
 	ips, err := net.LookupIP(host)
 	if err != nil {
