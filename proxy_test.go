@@ -268,29 +268,38 @@ func TestDoTUsesProxy(t *testing.T) {
 }
 
 // TestDoTHandshakeHonorsTimeout ensures Timeout bounds the TLS handshake on a
-// proxied DoT connection, so a resolver that never answers can't block a query.
+// DoT connection, direct or through the proxy, so a resolver that never
+// answers can't block a query.
 func TestDoTHandshakeHonorsTimeout(t *testing.T) {
 	const timeout = 500 * time.Millisecond
-	client, err := NewWithOptions(Options{
-		// stalledProxy also stands in for a DoT resolver that accepts the
-		// connection but never answers the TLS handshake.
-		BaseResolvers: []string{"dot:" + stalledProxy(t)},
-		MaxRetries:    1,
-		Timeout:       timeout,
-		Proxy:         newSOCKSProxy(t).URL(),
-	})
-	require.NoError(t, err)
+	proxies := map[string]string{
+		"direct": "",
+		"proxy":  newSOCKSProxy(t).URL(),
+	}
+	for name, proxyURL := range proxies {
+		t.Run(name, func(t *testing.T) {
+			client, err := NewWithOptions(Options{
+				// stalledProxy also stands in for a DoT resolver that accepts the
+				// connection but never answers the TLS handshake.
+				BaseResolvers: []string{"dot:" + stalledProxy(t)},
+				MaxRetries:    1,
+				Timeout:       timeout,
+				Proxy:         proxyURL,
+			})
+			require.NoError(t, err)
 
-	done := make(chan error, 1)
-	go func() {
-		_, err := client.QueryMultiple(fakeHost, []uint16{dns.TypeA})
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		require.Error(t, err)
-	case <-time.After(10 * timeout):
-		t.Fatalf("query still blocked after %s with Timeout %s", 10*timeout, timeout)
+			done := make(chan error, 1)
+			go func() {
+				_, err := client.QueryMultiple(fakeHost, []uint16{dns.TypeA})
+				done <- err
+			}()
+			select {
+			case err := <-done:
+				require.Error(t, err)
+			case <-time.After(10 * timeout):
+				t.Fatalf("query still blocked after %s with Timeout %s", 10*timeout, timeout)
+			}
+		})
 	}
 }
 
