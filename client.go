@@ -290,25 +290,27 @@ func (c *Client) clientFor(protocol Protocol) *dns.Client {
 }
 
 // dial opens a connection for client to the resolver at addr, through the
-// proxy when one is set.
+// proxy when one is set. Timeout bounds the whole setup, including the proxy
+// and TLS handshakes, which otherwise wait forever on a peer that accepts the
+// connection but never answers.
 func (c *Client) dial(client *dns.Client, addr string) (*dns.Conn, error) {
-	if c.proxyDialer != nil {
-		return c.dialProxy(client, addr)
-	}
-	return client.Dial(addr)
-}
-
-// dialProxy does what client.Dial does, but through the proxy: it opens a TCP
-// connection to addr and, for DoT, starts TLS on it. Timeout bounds the whole
-// setup, including the proxy and TLS handshakes, which otherwise wait forever
-// on a peer that accepts the connection but never answers.
-func (c *Client) dialProxy(client *dns.Client, addr string) (*dns.Conn, error) {
 	ctx := context.Background()
 	if c.options.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, c.options.Timeout)
 		defer cancel()
 	}
+	if c.proxyDialer != nil {
+		return c.dialProxy(ctx, client, addr)
+	}
+	// client.Timeout doesn't bound the dial: dns.Client applies it only to a
+	// dialer it builds itself, and client has one of ours.
+	return client.DialContext(ctx, addr)
+}
+
+// dialProxy does what client.DialContext does, but through the proxy: it opens
+// a TCP connection to addr and, for DoT, starts TLS on it.
+func (c *Client) dialProxy(ctx context.Context, client *dns.Client, addr string) (*dns.Conn, error) {
 	conn, err := c.proxyDialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, err
