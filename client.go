@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"net"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -633,7 +634,9 @@ func (c *Client) QueryParallel(host string, requestType uint16, resolvers []stri
 	return dnsdatas, nil
 }
 
-// Trace the requested domain with the provided query type
+// Trace the requested domain with the provided query type, following referrals
+// from the root servers. Besides its reply's answer, each step's NS lists the
+// name servers that the reply referred to.
 func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*TraceData, error) {
 	var tracedata TraceData
 	host = dns.CanonicalName(host)
@@ -663,18 +666,17 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*Trac
 			}
 		}
 
-		var newNSResolvers []string
+		var nsNames []string
+		glue := make(map[string][]string)
 		var nextCname string
 		for _, d := range dnsdatas {
-			// Add ns records as new resolvers
-			for _, ns := range d.NS {
-				nsData, err := c.A(ns)
-				if err != nil {
-					continue
-				}
-				for _, ip := range nsData.A {
-					newNSResolvers = append(newNSResolvers, net.JoinHostPort(ip, "53"))
-				}
+			// A referral lists the next name servers in the authority section,
+			// which ParseFromMsg leaves out of d.NS
+			names, addrs := referral(d.RawResp)
+			d.NS = sliceutil.Dedupe(append(d.NS, names...))
+			nsNames = append(nsNames, d.NS...)
+			for name, ips := range addrs {
+				glue[name] = append(glue[name], ips...)
 			}
 			// Follow CNAME - should happen at the final step of the trace
 			for _, cname := range d.CNAME {
@@ -682,6 +684,22 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*Trac
 					nextCname = cname
 					break
 				}
+			}
+		}
+		// Every root server returns the same referral, so resolve each name
+		// server once, from its glue when the referral has some
+		var newNSResolvers []string
+		for _, ns := range sliceutil.Dedupe(nsNames) {
+			ips := glue[ns]
+			if len(ips) == 0 {
+				nsData, err := c.A(ns)
+				if err != nil {
+					continue
+				}
+				ips = nsData.A
+			}
+			for _, ip := range ips {
+				newNSResolvers = append(newNSResolvers, net.JoinHostPort(ip, "53"))
 			}
 		}
 		newNSResolvers = sliceutil.Dedupe(newNSResolvers)
@@ -711,6 +729,31 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*Trac
 	}
 
 	return &tracedata, nil
+}
+
+// referral returns the name servers in msg's authority section, where a
+// referral lists them, and the IPv4 glue that its additional section gives for
+// them, keyed by name. Glue for any other name is left out.
+func referral(msg *dns.Msg) (names []string, glue map[string][]string) {
+	if msg == nil {
+		return nil, nil
+	}
+	for _, rr := range msg.Ns {
+		if ns, ok := rr.(*dns.NS); ok {
+			names = append(names, trimChars(ns.Ns))
+		}
+	}
+	glue = make(map[string][]string)
+	for _, rr := range msg.Extra {
+		a, ok := rr.(*dns.A)
+		if !ok {
+			continue
+		}
+		if name := trimChars(a.Hdr.Name); slices.Contains(names, name) {
+			glue[name] = append(glue[name], a.A.String())
+		}
+	}
+	return names, glue
 }
 
 func (c *Client) axfr(host string) (*AXFRData, error) {
