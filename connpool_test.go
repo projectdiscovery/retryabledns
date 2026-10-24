@@ -181,3 +181,25 @@ func TestConnPoolRepeatedClose(t *testing.T) {
 		t.Fatal("repeated pool close did not return")
 	}
 }
+
+// TestNewWithOptionsPoolsOnlyUDPResolvers ensures NewWithOptions builds
+// connection pools only for UDP resolvers, the only ones whose queries use
+// them. It used to dial a DoH URL as a UDP address and fail.
+func TestNewWithOptionsPoolsOnlyUDPResolvers(t *testing.T) {
+	udp := newFakeResolver(t, dns.RcodeSuccess)
+	doh := newFakeDoHResolver(t, dns.RcodeSuccess)
+	client, err := NewWithOptions(Options{
+		BaseResolvers: []string{
+			udp.Addr(),
+			"tcp:" + freeUDPAddr(t),
+			"dot:" + freeUDPAddr(t),
+			doh.ResolverString("post"),
+		},
+		MaxRetries:            1,
+		ConnectionPoolThreads: 2,
+	})
+	require.NoError(t, err)
+	t.Cleanup(client.Close)
+	require.Len(t, client.udpConnPool.Map, 1)
+	require.Contains(t, client.udpConnPool.Map, udp.Addr())
+}
