@@ -1,6 +1,7 @@
 package retryabledns
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -184,6 +185,90 @@ func TestTrace(t *testing.T) {
 	require.NoError(t, err)
 	_, err = client.Trace("www.projectdiscovery.io", dns.TypeA, 100)
 	require.NoError(t, err)
+}
+
+// TestTraceFollowsReferrals ensures Trace follows a referral, which leaves the
+// answer section empty, lists the next name servers in the authority section
+// and may give their addresses (glue) in the additional section. Each step
+// must list the name servers its reply referred to, and Trace must look up a
+// name server only when the referral has no glue for it, once however many
+// root servers returned the referral.
+func TestTraceFollowsReferrals(t *testing.T) {
+	const nsName = "ns1.trace.test."
+	for name, glue := range map[string]bool{"without glue": false, "with glue": true} {
+		t.Run(name, func(t *testing.T) {
+			var nsLookups atomic.Int64
+			respond := func(req *dns.Msg) *dns.Msg {
+				m := &dns.Msg{}
+				m.SetReply(req)
+				if req.Question[0].Name == nsName {
+					nsLookups.Add(1)
+					m.Answer = []dns.RR{arecord(nsName, "127.0.0.1")}
+					return m
+				}
+				m.Ns = []dns.RR{&dns.NS{
+					Hdr: dns.RR_Header{Name: "test.", Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 60},
+					Ns:  nsName,
+				}}
+				if glue {
+					m.Extra = []dns.RR{arecord(nsName, "127.0.0.1")}
+				}
+				return m
+			}
+			root1 := newFakeResolverFunc(t, respond)
+			root2 := newFakeResolverFunc(t, respond)
+			roots := RootDNSServersIPv4
+			RootDNSServersIPv4 = []string{root1.Addr(), root2.Addr()}
+			t.Cleanup(func() { RootDNSServersIPv4 = roots })
+
+			client, err := NewWithOptions(Options{
+				BaseResolvers: []string{root1.Addr()},
+				MaxRetries:    1,
+				Timeout:       time.Second,
+			})
+			require.NoError(t, err)
+
+			// A max recursion of 2 runs one step: query the roots, then find
+			// the address of the name server they referred to.
+			trace, err := client.Trace(fakeHost, dns.TypeA, 2)
+			require.NoError(t, err)
+			require.Len(t, trace.DNSData, 2, "one step per root server")
+			for _, d := range trace.DNSData {
+				require.Equal(t, []string{"ns1.trace.test"}, d.NS, "a step must list the name servers its reply referred to")
+			}
+			wantLookups := 1
+			if glue {
+				wantLookups = 0
+			}
+			require.EqualValues(t, wantLookups, nsLookups.Load(), "name server lookups")
+		})
+	}
+}
+
+// TestReferral ensures referral reads the name servers from the authority
+// section and keeps only the IPv4 glue for them.
+func TestReferral(t *testing.T) {
+	ns := func(target string) dns.RR {
+		return &dns.NS{
+			Hdr: dns.RR_Header{Name: "test.", Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 60},
+			Ns:  target,
+		}
+	}
+	msg := &dns.Msg{
+		Ns: []dns.RR{ns("ns1.trace.test."), ns("ns2.trace.test.")},
+		Extra: []dns.RR{
+			arecord("ns1.trace.test", "192.0.2.1"),
+			aaaarecord("ns1.trace.test", "2001:db8::1"),
+			arecord("unrelated.test", "192.0.2.9"),
+		},
+	}
+	names, glue := referral(msg)
+	require.Equal(t, []string{"ns1.trace.test", "ns2.trace.test"}, names)
+	require.Equal(t, map[string][]string{"ns1.trace.test": {"192.0.2.1"}}, glue)
+
+	names, glue = referral(nil)
+	require.Empty(t, names)
+	require.Empty(t, glue)
 }
 
 func TestAXFRWithUDPResolvers(t *testing.T) {
