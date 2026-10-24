@@ -64,3 +64,76 @@ func TestQueryMultipleWithResolverUnsupported(t *testing.T) {
 	}
 	require.Zero(t, fr.Queries())
 }
+
+// TestQueryMultipleAXFRWithDoH ensures a zone transfer through a DoH resolver
+// returns the resolver's reply instead of blocking on a transfer stream that
+// never ran, and that a failed transfer attempt doesn't hide the reply of the
+// next one.
+func TestQueryMultipleAXFRWithDoH(t *testing.T) {
+	doh := newFakeDoHResolver(t, dns.RcodeSuccess, arecord(fakeHost, "203.0.113.10"))
+	refusing := newFakeResolverTCP(t, dns.RcodeRefused)
+
+	tests := map[string]struct {
+		baseResolvers []string
+		maxRetries    int
+		query         func(*Client) (*DNSData, error)
+		transfers     int64 // zone transfers the refusing resolver receives
+	}{
+		"QueryMultiple": {
+			baseResolvers: []string{doh.ResolverString("post")},
+			maxRetries:    1,
+			query: func(c *Client) (*DNSData, error) {
+				return c.QueryMultiple(fakeHost, []uint16{dns.TypeAXFR})
+			},
+		},
+		"QueryMultipleWithResolver": {
+			baseResolvers: []string{doh.ResolverString("post")},
+			maxRetries:    1,
+			query: func(c *Client) (*DNSData, error) {
+				return c.QueryMultipleWithResolver(fakeHost, []uint16{dns.TypeAXFR}, parseResolver(doh.ResolverString("get")))
+			},
+		},
+		// The client advances its resolver index before each attempt, starting
+		// from 0, so the first attempt goes to the second resolver (the
+		// refusing transfer) and the second attempt to DoH.
+		"after a failed transfer": {
+			baseResolvers: []string{doh.ResolverString("post"), "tcp:" + refusing.Addr()},
+			maxRetries:    2,
+			query: func(c *Client) (*DNSData, error) {
+				return c.QueryMultiple(fakeHost, []uint16{dns.TypeAXFR})
+			},
+			transfers: 1,
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			transfers := refusing.Queries()
+			client, err := NewWithOptions(Options{
+				BaseResolvers: tt.baseResolvers,
+				MaxRetries:    tt.maxRetries,
+				Timeout:       time.Second,
+			})
+			require.NoError(t, err)
+			t.Cleanup(client.Close)
+
+			type result struct {
+				data *DNSData
+				err  error
+			}
+			done := make(chan result, 1)
+			go func() {
+				d, err := tt.query(client)
+				done <- result{d, err}
+			}()
+
+			select {
+			case res := <-done:
+				require.NoError(t, res.err)
+				require.Equal(t, []string{"203.0.113.10"}, res.data.A)
+			case <-time.After(5 * time.Second):
+				t.Fatal("zone transfer through DoH still blocked after 5s")
+			}
+			require.EqualValues(t, tt.transfers, refusing.Queries()-transfers, "zone transfers sent to the refusing resolver")
+		})
+	}
+}

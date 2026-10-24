@@ -485,12 +485,13 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 			msg.Question[0] = question
 		}
 
-		var (
-			resp   *dns.Msg
-			trResp chan *dns.Envelope
-			i      int
-		)
+		var i int
 		for i = 0; i < c.options.MaxRetries; i++ {
+			// These hold only this attempt's result.
+			var (
+				resp   *dns.Msg
+				trResp chan *dns.Envelope
+			)
 			if activeConn != nil {
 				_ = activeConn.Close()
 				activeConn = nil
@@ -537,10 +538,11 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 				continue
 			}
 
-			switch requestType {
-			case dns.TypeAXFR:
+			// Parse what this attempt received. A DoH resolver answers a zone
+			// transfer with a single reply, so AXFR doesn't imply a stream.
+			if trResp != nil {
 				err = dnsdata.ParseFromEnvelopeChan(trResp)
-			default:
+			} else {
 				err = dnsdata.ParseFromMsg(resp)
 			}
 
