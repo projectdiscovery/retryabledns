@@ -3,6 +3,7 @@ package retryabledns
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/gob"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"math/rand"
 	"net"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -48,16 +50,17 @@ type Client struct {
 	options      Options
 	serversIndex uint32
 	TCPFallback  bool
-	udpClient    *dns.Client
-	udpConnPool  mapsutil.SyncLockMap[string, *ConnPool]
-	tcpClient    *dns.Client
-	dohClient    *doh.Client
-	dotClient    *dns.Client
-	udpProxy     proxy.Dialer
-	tcpProxy     proxy.Dialer
-	dotProxy     proxy.Dialer
-	knownHosts   map[string][]string
-	stats        *statsRegistry
+	// udpClient, tcpClient and dotClient reach resolvers only through
+	// exchange and dial, so every connection goes through the proxy when
+	// Proxy is set.
+	udpClient   *dns.Client
+	udpConnPool mapsutil.SyncLockMap[string, *ConnPool]
+	tcpClient   *dns.Client
+	dohClient   *doh.Client
+	dotClient   *dns.Client
+	proxyDialer proxy.ContextDialer
+	knownHosts  map[string][]string
+	stats       *statsRegistry
 }
 
 // New creates a new dns client
@@ -85,20 +88,6 @@ func NewWithOptions(options Options) (*Client, error) {
 		doh.WithInsecureSkipVerify(),
 		doh.WithProxy(options.Proxy), // no-op if empty
 	)
-
-	// If proxy is specified, force TCP for all resolvers
-	if options.Proxy != "" {
-		for i, resolver := range parsedBaseResolvers {
-			if networkResolver, ok := resolver.(*NetworkResolver); ok && networkResolver.Protocol == UDP {
-				// Convert UDP resolvers to TCP when proxy is specified
-				parsedBaseResolvers[i] = &NetworkResolver{
-					Protocol: TCP,
-					Host:     networkResolver.Host,
-					Port:     networkResolver.Port,
-				}
-			}
-		}
-	}
 
 	udpDialer := &net.Dialer{LocalAddr: options.GetLocalAddr(UDP)}
 	tcpDialer := &net.Dialer{LocalAddr: options.GetLocalAddr(TCP)}
@@ -141,49 +130,46 @@ func NewWithOptions(options Options) (*Client, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid proxy URL: %v", err)
 		}
-		proxyDialer, err := proxy.FromURL(proxyURL, udpDialer)
+		// The hop to a SOCKS5 proxy is always TCP, so one dialer serves every
+		// resolver protocol.
+		proxyDialer, err := proxy.FromURL(proxyURL, tcpDialer)
 		if err != nil {
 			return nil, fmt.Errorf("error creating proxy dialer: %v", err)
 		}
-		tcpProxyDialer, err := proxy.FromURL(proxyURL, tcpDialer)
-		if err != nil {
-			return nil, fmt.Errorf("error creating proxy dialer: %v", err)
+		// DialContext is what lets Timeout bound the proxy handshake.
+		contextDialer, ok := proxyDialer.(proxy.ContextDialer)
+		if !ok {
+			return nil, fmt.Errorf("proxy dialer for scheme %q does not support timeouts", proxyURL.Scheme)
 		}
-		dotProxyDialer, err := proxy.FromURL(proxyURL, dotDialer)
-		if err != nil {
-			return nil, fmt.Errorf("error creating proxy dialer: %v", err)
-		}
-
-		client.udpProxy = proxyDialer
-		client.tcpProxy = tcpProxyDialer
-		client.dotProxy = dotProxyDialer
+		client.proxyDialer = contextDialer
 	}
 
+	// Pool exactly the resolvers that exchange sends through udpClient: UDP
+	// resolvers, and only without a proxy, since with one clientFor sends them
+	// over TCP.
 	if options.ConnectionPoolThreads > 1 {
 		client.udpConnPool = mapsutil.SyncLockMap[string, *ConnPool]{
 			Map: make(mapsutil.Map[string, *ConnPool]),
 		}
 		for _, resolver := range client.resolvers {
-			resolverHost, resolverPort, err := net.SplitHostPort(resolver.String())
+			r, ok := resolver.(*NetworkResolver)
+			if !ok || client.clientFor(r.Protocol) != client.udpClient {
+				continue
+			}
+			udpConnPool, err := NewConnPool(*r, options.ConnectionPoolThreads)
 			if err != nil {
 				return nil, err
 			}
-			networkResolver := NetworkResolver{
-				Protocol: UDP,
-				Port:     resolverPort,
-				Host:     resolverHost,
-			}
-			udpConnPool, err := NewConnPool(networkResolver, options.ConnectionPoolThreads)
-			if err != nil {
-				return nil, err
-			}
-			_ = client.udpConnPool.Set(resolver.String(), udpConnPool)
+			_ = client.udpConnPool.Set(r.String(), udpConnPool)
 		}
 	}
 	return &client, nil
 }
 
-// ResolveWithSyscall attempts to resolve the host through system calls
+// ResolveWithSyscall resolves host to A and AAAA records using the operating
+// system's resolver. It ignores the client's options, including Proxy,
+// BaseResolvers, and Timeout, so its lookups never go through the proxy. Call
+// Resolve to apply them.
 func (c *Client) ResolveWithSyscall(host string) (*DNSData, error) {
 	ips, err := net.LookupIP(host)
 	if err != nil {
@@ -217,67 +203,135 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 		resolver := c.resolvers[index%uint32(len(c.resolvers))]
 
 		attemptStart := time.Now()
-		switch r := resolver.(type) {
-		case *NetworkResolver:
-			switch r.Protocol {
-			case TCP:
-				if c.tcpProxy != nil {
-					var tcpConn *dns.Conn
-					tcpConn, err = c.dialWithProxy(c.tcpProxy, "tcp", resolver.String())
-					if err != nil {
-						break
-					}
-					defer tcpConn.Close()
-					resp, _, err = c.tcpClient.ExchangeWithConn(msg, tcpConn)
-				} else {
-					resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
-				}
-			case UDP:
-				if c.options.ConnectionPoolThreads > 1 {
-					if udpConnPool, ok := c.udpConnPool.Get(resolver.String()); ok {
-						resp, _, err = udpConnPool.Exchange(context.TODO(), c.udpClient, msg)
-					}
-				} else if c.udpProxy != nil {
-					var udpConn *dns.Conn
-					udpConn, err = c.dialWithProxy(c.udpProxy, "udp", resolver.String())
-					if err != nil {
-						break
-					}
-					defer udpConn.Close()
-					resp, _, err = c.udpClient.ExchangeWithConn(msg, udpConn)
-				} else {
-					resp, _, err = c.udpClient.Exchange(msg, resolver.String())
-				}
-			case DOT:
-				resp, _, err = c.dotClient.Exchange(msg, resolver.String())
-			}
-		case *DohResolver:
-			method := doh.MethodPost
-			if r.Protocol == GET {
-				method = doh.MethodGet
-			}
-			resp, err = c.dohClient.QueryWithDOHMsg(method, doh.Resolver{URL: r.URL}, msg)
-		}
+		resp, err = c.query(msg, resolver)
 		c.recordAttempt(resolver, attemptStart, err)
-
 		if err != nil || resp == nil {
 			continue
 		}
 
-		if resp.Rcode != dns.RcodeSuccess {
+		if !c.options.exitOnRcode(resp.Rcode) {
 			continue
 		}
 
 		// In case we get a non empty answer stop retrying
 		return resp, nil
 	}
+	// When ExitOnStatusCodes is set, suppress non-definitive trailing
+	// responses so callers can't mistake them for an answer.
+	if len(c.options.ExitOnStatusCodes) > 0 && resp != nil && !c.options.exitOnRcode(resp.Rcode) {
+		resp = nil
+	}
+	// Keep the last attempt's error so callers can tell, for example, a
+	// proxy failure from a resolver failure. With no error (the last
+	// attempt got a non-definitive response) return the bare sentinel.
+	if err != nil {
+		return resp, errors.Join(ErrRetriesExceeded, err)
+	}
 	return resp, ErrRetriesExceeded
 }
 
-func (c *Client) dialWithProxy(dialer proxy.Dialer, network, addr string) (*dns.Conn, error) {
-	conn, err := dialer.Dial(network, addr)
+// query sends msg to resolver and returns the reply. It either sends the query
+// or returns an error, so a retry loop can't mistake a skipped attempt for an
+// empty answer.
+func (c *Client) query(msg *dns.Msg, resolver Resolver) (*dns.Msg, error) {
+	switch r := resolver.(type) {
+	case *NetworkResolver:
+		return c.exchange(msg, r.Protocol, r.String())
+	case *DohResolver:
+		method := doh.MethodPost
+		if r.Protocol == GET {
+			method = doh.MethodGet
+		}
+		return c.dohClient.QueryWithDOHMsg(method, doh.Resolver{URL: r.URL}, msg)
+	default:
+		return nil, fmt.Errorf("unsupported resolver type %T", resolver)
+	}
+}
+
+// exchange sends msg to the resolver at addr over protocol. Any connection it
+// opens is closed before it returns.
+func (c *Client) exchange(msg *dns.Msg, protocol Protocol, addr string) (*dns.Msg, error) {
+	client := c.clientFor(protocol)
+	if client == nil {
+		return nil, fmt.Errorf("unsupported protocol %q", protocol)
+	}
+	// Pools exist only for BaseResolvers, so any other resolver gets a
+	// connection of its own.
+	if client == c.udpClient {
+		if pool, ok := c.udpConnPool.Get(addr); ok {
+			resp, _, err := pool.Exchange(context.TODO(), client, msg)
+			return resp, err
+		}
+	}
+	conn, err := c.dial(client, addr)
 	if err != nil {
 		return nil, err
+	}
+	defer func() { _ = conn.Close() }()
+	resp, _, err := client.ExchangeWithConn(msg, conn)
+	return resp, err
+}
+
+// clientFor returns the client that queries a resolver over protocol, or nil
+// if the protocol is unsupported. SOCKS5 relays only TCP, so with a proxy UDP
+// resolvers are queried over TCP.
+func (c *Client) clientFor(protocol Protocol) *dns.Client {
+	if c.proxyDialer != nil && protocol == UDP {
+		protocol = TCP
+	}
+	switch protocol {
+	case UDP:
+		return c.udpClient
+	case TCP:
+		return c.tcpClient
+	case DOT:
+		return c.dotClient
+	}
+	return nil
+}
+
+// dial opens a connection for client to the resolver at addr, through the
+// proxy when one is set. Timeout bounds the whole setup, including the proxy
+// and TLS handshakes, which otherwise wait forever on a peer that accepts the
+// connection but never answers.
+func (c *Client) dial(client *dns.Client, addr string) (*dns.Conn, error) {
+	ctx := context.Background()
+	if c.options.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.options.Timeout)
+		defer cancel()
+	}
+	if c.proxyDialer != nil {
+		return c.dialProxy(ctx, client, addr)
+	}
+	// client.Timeout doesn't bound the dial: dns.Client applies it only to a
+	// dialer it builds itself, and client has one of ours.
+	return client.DialContext(ctx, addr)
+}
+
+// dialProxy does what client.DialContext does, but through the proxy: it opens
+// a TCP connection to addr and, for DoT, starts TLS on it.
+func (c *Client) dialProxy(ctx context.Context, client *dns.Client, addr string) (*dns.Conn, error) {
+	conn, err := c.proxyDialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	if client.Net == "tcp-tls" {
+		// Like tls.Dialer, verify the certificate against the host in addr
+		// unless the client's config names a server.
+		config := client.TLSConfig.Clone()
+		if config == nil {
+			config = &tls.Config{}
+		}
+		if config.ServerName == "" {
+			config.ServerName, _, _ = net.SplitHostPort(addr)
+		}
+		tlsConn := tls.Client(conn, config)
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			_ = conn.Close()
+			return nil, err
+		}
+		conn = tlsConn
 	}
 	return &dns.Conn{Conn: conn}, nil
 }
@@ -359,10 +413,21 @@ func (c *Client) QueryMultiple(host string, requestTypes []uint16) (*DNSData, er
 // QueryMultiple sends a provided dns request and return the data
 func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Resolver) (*DNSData, error) {
 	var (
-		hasResolver bool = resolver != nil
+		hasResolver = resolver != nil
 		dnsdata     DNSData
 		err         error
+		// activeConn holds the AXFR connection dialed for the current attempt.
+		// The transfer is read further down the loop body, so the connection
+		// is closed at the top of the next iteration and via defer on return.
+		// A deferred Close inside the loop only fires when queryMultiple
+		// returns, so it would leak one socket per retry and per request type.
+		activeConn *dns.Conn
 	)
+	defer func() {
+		if activeConn != nil {
+			_ = activeConn.Close()
+		}
+	}()
 
 	// integrate data with known hosts in case
 	if c.options.Hostsfile {
@@ -423,69 +488,37 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 			msg.Question[0] = question
 		}
 
-		var (
-			resp   *dns.Msg
-			trResp chan *dns.Envelope
-			i      int
-		)
+		var i int
 		for i = 0; i < c.options.MaxRetries; i++ {
+			// These hold only this attempt's result.
+			var (
+				resp   *dns.Msg
+				trResp chan *dns.Envelope
+			)
+			if activeConn != nil {
+				_ = activeConn.Close()
+				activeConn = nil
+			}
 			index := atomic.AddUint32(&c.serversIndex, 1)
 			if !hasResolver {
 				resolver = c.resolvers[index%uint32(len(c.resolvers))]
 			}
 			attemptStart := time.Now()
-			switch r := resolver.(type) {
-			case *NetworkResolver:
-				if requestType == dns.TypeAXFR {
-					var dnsconn *dns.Conn
-					switch r.Protocol {
-					case TCP:
-						dnsconn, err = c.tcpClient.Dial(resolver.String())
-					case UDP:
-						dnsconn, err = c.udpClient.Dial(resolver.String())
-					case DOT:
-						dnsconn, err = c.dotClient.Dial(resolver.String())
-					default:
-						dnsconn, err = c.tcpClient.Dial(resolver.String())
-					}
-					if err != nil {
-						break
-					}
-					defer dnsconn.Close()
+			if r, ok := resolver.(*NetworkResolver); ok && requestType == dns.TypeAXFR {
+				client := c.clientFor(r.Protocol)
+				if client == nil {
+					// zone transfers run over TCP, so it is the safe default
+					client = c.tcpClient
+				}
+				var dnsconn *dns.Conn
+				dnsconn, err = c.dial(client, resolver.String())
+				if err == nil {
+					activeConn = dnsconn
 					dnsTransfer := &dns.Transfer{Conn: dnsconn}
 					trResp, err = dnsTransfer.In(msg, resolver.String())
-				} else {
-					switch r.Protocol {
-					case TCP:
-						if c.tcpProxy != nil {
-							var tcpConn *dns.Conn
-							tcpConn, err = c.dialWithProxy(c.tcpProxy, "tcp", resolver.String())
-							if err != nil {
-								break
-							}
-							defer tcpConn.Close()
-							resp, _, err = c.tcpClient.ExchangeWithConn(msg, tcpConn)
-						} else {
-							resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
-						}
-					case UDP:
-						if c.options.ConnectionPoolThreads > 1 {
-							if udpConnPool, ok := c.udpConnPool.Get(resolver.String()); ok {
-								resp, _, err = udpConnPool.Exchange(context.TODO(), c.udpClient, msg)
-							}
-						} else {
-							resp, _, err = c.udpClient.Exchange(msg, resolver.String())
-						}
-					case DOT:
-						resp, _, err = c.dotClient.Exchange(msg, resolver.String())
-					}
 				}
-			case *DohResolver:
-				method := doh.MethodPost
-				if r.Protocol == GET {
-					method = doh.MethodGet
-				}
-				resp, err = c.dohClient.QueryWithDOHMsg(method, doh.Resolver{URL: r.URL}, msg)
+			} else {
+				resp, err = c.query(msg, resolver)
 			}
 			c.recordAttempt(resolver, attemptStart, err)
 
@@ -495,16 +528,26 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 
 			// https://github.com/projectdiscovery/retryabledns/issues/25
 			if resp != nil && resp.Truncated && c.TCPFallback {
-				resp, _, err = c.tcpClient.Exchange(msg, resolver.String())
+				resp, err = c.exchange(msg, TCP, resolver.String())
 				if err != nil || resp == nil {
 					continue
 				}
 			}
 
-			switch requestType {
-			case dns.TypeAXFR:
+			// https://github.com/projectdiscovery/retryabledns/issues/250
+			// When ExitOnStatusCodes is set, drop attempts whose rcode
+			// is not in the list before they touch dnsdata. This keeps
+			// dnsdata.Raw / dnsdata.Resolver / status fields free of
+			// data from intermediate non-definitive responses.
+			if resp != nil && len(c.options.ExitOnStatusCodes) > 0 && !c.options.exitOnRcode(resp.Rcode) {
+				continue
+			}
+
+			// Parse what this attempt received. A DoH resolver answers a zone
+			// transfer with a single reply, so AXFR doesn't imply a stream.
+			if trResp != nil {
 				err = dnsdata.ParseFromEnvelopeChan(trResp)
-			default:
+			} else {
 				err = dnsdata.ParseFromMsg(resp)
 			}
 
@@ -526,12 +569,20 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 			dnsdata.Resolver = append(dnsdata.Resolver, resolver.String())
 
 			if err != nil || !dnsdata.contains() {
+				// An empty response can still be a definitive answer
+				// (e.g. NXDOMAIN) when the user has opted into that via
+				// ExitOnStatusCodes. Break so callers see the status
+				// code without further retries polluting dnsdata.
+				if len(c.options.ExitOnStatusCodes) > 0 && resp != nil && c.options.exitOnRcode(resp.Rcode) {
+					break
+				}
 				continue
 			}
 			dnsdata.dedupe()
 
-			// stop on success
-			if resp != nil && resp.Rcode == dns.RcodeSuccess {
+			// stop on a definitive rcode (success by default, or any of
+			// the user-provided ExitOnStatusCodes)
+			if resp != nil && c.options.exitOnRcode(resp.Rcode) {
 				break
 			}
 			if trResp != nil {
@@ -548,7 +599,10 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 	return &dnsdata, err
 }
 
-// QueryParallel sends a provided dns request to multiple resolvers in parallel
+// QueryParallel sends a provided dns request to multiple resolvers in parallel.
+// With both LocalAddrIP and LocalAddrPort set, queries that dial their own
+// connection compete for that local port, so all but one may fail and come
+// back empty.
 func (c *Client) QueryParallel(host string, requestType uint16, resolvers []string) ([]*DNSData, error) {
 	msg := dns.Msg{}
 	msg.SetQuestion(dns.CanonicalName(host), requestType)
@@ -562,9 +616,10 @@ func (c *Client) QueryParallel(host string, requestType uint16, resolvers []stri
 		wg.Add(1)
 		go func(resolver string, dnsdata *DNSData) {
 			defer wg.Done()
+			r := parseResolver(resolver)
 			attemptStart := time.Now()
-			resp, err := dns.Exchange(msg.Copy(), resolver)
-			c.stats.record(resolver, time.Since(attemptStart), err)
+			resp, err := c.query(msg.Copy(), r)
+			c.recordAttempt(r, attemptStart, err)
 			if err != nil {
 				return
 			}
@@ -588,7 +643,9 @@ func (c *Client) QueryParallel(host string, requestType uint16, resolvers []stri
 	return dnsdatas, nil
 }
 
-// Trace the requested domain with the provided query type
+// Trace the requested domain with the provided query type, following referrals
+// from the root servers. Besides its reply's answer, each step's NS lists the
+// name servers that the reply referred to.
 func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*TraceData, error) {
 	var tracedata TraceData
 	host = dns.CanonicalName(host)
@@ -618,20 +675,17 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*Trac
 			}
 		}
 
-		var newNSResolvers []string
+		var nsNames []string
+		glue := make(map[string][]string)
 		var nextCname string
 		for _, d := range dnsdatas {
-			// Add ns records as new resolvers
-			for _, ns := range d.NS {
-				ips, err := net.LookupIP(ns)
-				if err != nil {
-					continue
-				}
-				for _, ip := range ips {
-					if ip.To4() != nil {
-						newNSResolvers = append(newNSResolvers, net.JoinHostPort(ip.String(), "53"))
-					}
-				}
+			// A referral lists the next name servers in the authority section,
+			// which ParseFromMsg leaves out of d.NS
+			names, addrs := referral(d.RawResp)
+			d.NS = sliceutil.Dedupe(append(d.NS, names...))
+			nsNames = append(nsNames, d.NS...)
+			for name, ips := range addrs {
+				glue[name] = append(glue[name], ips...)
 			}
 			// Follow CNAME - should happen at the final step of the trace
 			for _, cname := range d.CNAME {
@@ -639,6 +693,22 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*Trac
 					nextCname = cname
 					break
 				}
+			}
+		}
+		// Every root server returns the same referral, so resolve each name
+		// server once, from its glue when the referral has some
+		var newNSResolvers []string
+		for _, ns := range sliceutil.Dedupe(nsNames) {
+			ips := glue[ns]
+			if len(ips) == 0 {
+				nsData, err := c.A(ns)
+				if err != nil {
+					continue
+				}
+				ips = nsData.A
+			}
+			for _, ip := range ips {
+				newNSResolvers = append(newNSResolvers, net.JoinHostPort(ip, "53"))
 			}
 		}
 		newNSResolvers = sliceutil.Dedupe(newNSResolvers)
@@ -668,6 +738,31 @@ func (c *Client) Trace(host string, requestType uint16, maxrecursion int) (*Trac
 	}
 
 	return &tracedata, nil
+}
+
+// referral returns the name servers in msg's authority section, where a
+// referral lists them, and the IPv4 glue that its additional section gives for
+// them, keyed by name. Glue for any other name is left out.
+func referral(msg *dns.Msg) (names []string, glue map[string][]string) {
+	if msg == nil {
+		return nil, nil
+	}
+	for _, rr := range msg.Ns {
+		if ns, ok := rr.(*dns.NS); ok {
+			names = append(names, trimChars(ns.Ns))
+		}
+	}
+	glue = make(map[string][]string)
+	for _, rr := range msg.Extra {
+		a, ok := rr.(*dns.A)
+		if !ok {
+			continue
+		}
+		if name := trimChars(a.Hdr.Name); slices.Contains(names, name) {
+			glue[name] = append(glue[name], a.A.String())
+		}
+	}
+	return names, glue
 }
 
 func (c *Client) axfr(host string) (*AXFRData, error) {
