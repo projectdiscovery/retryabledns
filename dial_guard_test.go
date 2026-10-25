@@ -45,7 +45,7 @@ var poolFuncs = map[string]bool{
 // Everything else reaches resolvers through these functions, which is what
 // keeps every connection on the proxy when Proxy is set.
 var connectAllowed = map[string][]string{
-	"Client.dial":               {"(*github.com/miekg/dns.Client).Dial"},
+	"Client.dial":               {"(*github.com/miekg/dns.Client).DialContext"},
 	"Client.dialProxy":          {"(golang.org/x/net/proxy.ContextDialer).DialContext"},
 	"Client.exchange":           {"(*github.com/miekg/dns.Client).ExchangeWithConn", "(*" + thisPkg + ".ConnPool).Exchange"},
 	"Client.queryMultiple":      {"(*github.com/miekg/dns.Transfer).In"},      // its Conn comes from dial
