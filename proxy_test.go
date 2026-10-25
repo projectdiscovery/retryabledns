@@ -409,8 +409,8 @@ func TestTraceUsesProxy(t *testing.T) {
 			m.Answer = []dns.RR{arecord(nsName, "127.0.0.1")}
 			return m
 		}
-		// The trace reads name servers from the answer section only.
-		m.Answer = []dns.RR{&dns.NS{
+		// A referral: no answer, and the name server in the authority section.
+		m.Ns = []dns.RR{&dns.NS{
 			Hdr: dns.RR_Header{Name: req.Question[0].Name, Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 60},
 			Ns:  nsName,
 		}}
