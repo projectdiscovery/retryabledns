@@ -141,27 +141,23 @@ func NewWithOptions(options Options) (*Client, error) {
 		client.proxyDialer = contextDialer
 	}
 
-	// With a proxy, every query goes over TCP through it, so UDP pools would
-	// only dial resolvers directly.
-	if options.ConnectionPoolThreads > 1 && client.proxyDialer == nil {
+	// Pool exactly the resolvers that exchange sends through udpClient: UDP
+	// resolvers, and only without a proxy, since with one clientFor sends them
+	// over TCP.
+	if options.ConnectionPoolThreads > 1 {
 		client.udpConnPool = mapsutil.SyncLockMap[string, *ConnPool]{
 			Map: make(mapsutil.Map[string, *ConnPool]),
 		}
 		for _, resolver := range client.resolvers {
-			resolverHost, resolverPort, err := net.SplitHostPort(resolver.String())
+			r, ok := resolver.(*NetworkResolver)
+			if !ok || client.clientFor(r.Protocol) != client.udpClient {
+				continue
+			}
+			udpConnPool, err := NewConnPool(*r, options.ConnectionPoolThreads)
 			if err != nil {
 				return nil, err
 			}
-			networkResolver := NetworkResolver{
-				Protocol: UDP,
-				Port:     resolverPort,
-				Host:     resolverHost,
-			}
-			udpConnPool, err := NewConnPool(networkResolver, options.ConnectionPoolThreads)
-			if err != nil {
-				return nil, err
-			}
-			_ = client.udpConnPool.Set(resolver.String(), udpConnPool)
+			_ = client.udpConnPool.Set(r.String(), udpConnPool)
 		}
 	}
 	return &client, nil
