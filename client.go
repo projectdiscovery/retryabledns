@@ -528,7 +528,9 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 
 			// https://github.com/projectdiscovery/retryabledns/issues/25
 			if resp != nil && resp.Truncated && c.TCPFallback {
+				attemptStart = time.Now()
 				resp, err = c.exchange(msg, TCP, resolver.String())
+				c.recordAttempt(resolver, attemptStart, err)
 				if err != nil || resp == nil {
 					continue
 				}

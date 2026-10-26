@@ -37,17 +37,14 @@ type ResolverStats struct {
 }
 
 // resolverStats is the live, mutable counter set for a single resolver.
-// All counters are updated lock-free; LastError is guarded by mu so we
-// don't tear an interface value on concurrent writes.
+// All counters, including lastError, are updated lock-free.
 type resolverStats struct {
 	requests      atomic.Uint64
 	successes     atomic.Uint64
 	errors        atomic.Uint64
 	totalDuration atomic.Int64 // nanoseconds
 	lastLatency   atomic.Int64 // nanoseconds
-
-	mu        sync.Mutex
-	lastError error
+	lastError     atomic.Pointer[error]
 }
 
 func (rs *resolverStats) record(duration time.Duration, err error) {
@@ -56,15 +53,13 @@ func (rs *resolverStats) record(duration time.Duration, err error) {
 	rs.lastLatency.Store(duration.Nanoseconds())
 	if err != nil {
 		rs.errors.Add(1)
-		rs.mu.Lock()
-		rs.lastError = err
-		rs.mu.Unlock()
+		rs.lastError.Store(&err)
 		return
 	}
 	rs.successes.Add(1)
-	rs.mu.Lock()
-	rs.lastError = nil
-	rs.mu.Unlock()
+	if rs.lastError.Load() != nil {
+		rs.lastError.Store(nil)
+	}
 }
 
 func (rs *resolverStats) snapshot(resolver string) ResolverStats {
@@ -74,9 +69,10 @@ func (rs *resolverStats) snapshot(resolver string) ResolverStats {
 	if reqs > 0 {
 		avg = total / time.Duration(reqs)
 	}
-	rs.mu.Lock()
-	lastErr := rs.lastError
-	rs.mu.Unlock()
+	var lastErr error
+	if p := rs.lastError.Load(); p != nil {
+		lastErr = *p
+	}
 	return ResolverStats{
 		Resolver:        resolver,
 		Requests:        reqs,

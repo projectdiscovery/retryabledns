@@ -187,3 +187,28 @@ func TestClient_ResetStats(t *testing.T) {
 	client.ResetStats()
 	require.Empty(t, client.Stats())
 }
+
+// TestClient_TCPFallbackRecordsStats verifies the TCP retry of a truncated
+// reply counts as its own attempt.
+func TestClient_TCPFallbackRecordsStats(t *testing.T) {
+	fr := &fakeResolver{respond: func(req *dns.Msg) *dns.Msg {
+		m := fixedResponse(dns.RcodeSuccess, []dns.RR{arecord(fakeHost, "203.0.113.10")})(req)
+		m.Truncated = true
+		return m
+	}}
+	fr.startUDP(t, "127.0.0.1:0")
+	fr.startTCP(t, fr.addr)
+	client, err := NewWithOptions(Options{
+		BaseResolvers: []string{fr.Addr()},
+		MaxRetries:    1,
+		Timeout:       time.Second,
+	})
+	require.NoError(t, err)
+	client.TCPFallback = true
+
+	_, err = client.QueryMultiple(fakeHost, []uint16{dns.TypeA})
+	require.NoError(t, err)
+	rs := client.Stats()[fr.Addr()]
+	require.Equal(t, uint64(2), rs.Requests, "the UDP query and its TCP retry are two attempts")
+	require.Equal(t, uint64(2), rs.Successes)
+}
