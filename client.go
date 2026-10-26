@@ -122,7 +122,7 @@ func NewWithOptions(options Options) (*Client, error) {
 		dohClient:  dohClient,
 		dotClient:  dotClient,
 		knownHosts: knownHosts,
-		stats:      newStatsRegistry(),
+		stats:      newStatsRegistry(resolverKeys(parsedBaseResolvers)...),
 	}
 
 	if options.Proxy != "" {

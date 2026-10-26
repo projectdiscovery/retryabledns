@@ -78,6 +78,8 @@ func main() {
 
 Every client automatically tracks per-resolver counters (requests, successes, errors, total/average/last round-trip, last error). Read them at any time with `Client.Stats()` and clear with `Client.ResetStats()`.
 
+Only the resolvers configured in the client (`BaseResolvers`) are tracked, so the stats map never holds more entries than the configured list. Nameservers reached outside that list are never recorded: the root and TLD servers walked by `Trace`, the targets of `QueryParallel`, the name servers used by `AXFR`, and any resolver passed to `QueryMultipleWithResolver` that is not configured.
+
 ```go
 stats := dnsClient.Stats()
 for resolver, s := range stats {

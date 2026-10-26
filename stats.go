@@ -85,15 +85,27 @@ func (rs *resolverStats) snapshot(resolver string) ResolverStats {
 	}
 }
 
-// statsRegistry holds the live counters for every resolver the client
-// has issued attempts against. Entries are created lazily on first use.
+// statsRegistry holds the live counters for the resolvers configured in the
+// client. Entries are created lazily on first use, but only for the fixed set
+// of configured resolvers, so the map is bounded by the configured list.
+// Ad-hoc nameservers (Trace referrals, QueryParallel targets, AXFR name
+// servers, explicit per-call resolvers) are never recorded.
 type statsRegistry struct {
 	mu      sync.RWMutex
 	entries map[string]*resolverStats
+	// allowed is the set of resolver strings that may be recorded. It is
+	// built once at construction and is read-only afterwards.
+	allowed map[string]struct{}
 }
 
-func newStatsRegistry() *statsRegistry {
-	return &statsRegistry{entries: make(map[string]*resolverStats)}
+func newStatsRegistry(resolvers ...string) *statsRegistry {
+	allowed := make(map[string]struct{}, len(resolvers))
+	for _, r := range resolvers {
+		if r != "" {
+			allowed[r] = struct{}{}
+		}
+	}
+	return &statsRegistry{entries: make(map[string]*resolverStats), allowed: allowed}
 }
 
 // get returns the counter set for the given resolver, creating it on
@@ -116,10 +128,11 @@ func (r *statsRegistry) get(resolver string) *resolverStats {
 }
 
 // record updates the counters for resolver with the duration and result
-// of a single attempt. A nil resolver string is treated as a no-op so
-// callers don't need to guard the common "unknown resolver" path.
+// of a single attempt. An empty or non-configured resolver is a no-op, so
+// callers don't need to guard the "unknown resolver" path and ad-hoc
+// nameservers can't grow the map.
 func (r *statsRegistry) record(resolver string, duration time.Duration, err error) {
-	if resolver == "" {
+	if _, ok := r.allowed[resolver]; !ok {
 		return
 	}
 	r.get(resolver).record(duration, err)
@@ -146,8 +159,11 @@ func (r *statsRegistry) reset() {
 }
 
 // Stats returns a point-in-time snapshot of the per-resolver counters
-// accumulated by every attempt the client has issued so far. The map
-// is keyed by the resolver string (matching Resolver.String()).
+// accumulated by every attempt the client has issued so far against its
+// configured resolvers. The map is keyed by the resolver string (matching
+// Resolver.String()) and only holds configured resolvers that have seen at
+// least one attempt. Nameservers reached outside the configured list (Trace
+// referrals, QueryParallel, AXFR, QueryMultipleWithResolver) are not tracked.
 //
 // Stats are tracked automatically; there is no opt-in. Counters are
 // updated lock-free so they have negligible cost on the hot path.
@@ -170,4 +186,15 @@ func (c *Client) recordAttempt(resolver Resolver, start time.Time, err error) {
 		return
 	}
 	c.stats.record(resolver.String(), time.Since(start), err)
+}
+
+// resolverKeys returns the stats keys of the configured resolvers.
+func resolverKeys(resolvers []Resolver) []string {
+	keys := make([]string, 0, len(resolvers))
+	for _, r := range resolvers {
+		if r != nil {
+			keys = append(keys, r.String())
+		}
+	}
+	return keys
 }

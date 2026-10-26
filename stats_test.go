@@ -2,6 +2,7 @@ package retryabledns
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -11,7 +12,7 @@ import (
 )
 
 func TestStatsRegistry_Record(t *testing.T) {
-	reg := newStatsRegistry()
+	reg := newStatsRegistry("1.1.1.1:53")
 	reg.record("1.1.1.1:53", 10*time.Millisecond, nil)
 	reg.record("1.1.1.1:53", 20*time.Millisecond, nil)
 	reg.record("1.1.1.1:53", 30*time.Millisecond, errors.New("timeout"))
@@ -31,7 +32,7 @@ func TestStatsRegistry_Record(t *testing.T) {
 }
 
 func TestStatsRegistry_LastErrorClearedOnSuccess(t *testing.T) {
-	reg := newStatsRegistry()
+	reg := newStatsRegistry("r")
 	reg.record("r", time.Millisecond, errors.New("boom"))
 	require.EqualError(t, reg.snapshot()["r"].LastError, "boom")
 
@@ -40,7 +41,7 @@ func TestStatsRegistry_LastErrorClearedOnSuccess(t *testing.T) {
 }
 
 func TestStatsRegistry_MultipleResolvers(t *testing.T) {
-	reg := newStatsRegistry()
+	reg := newStatsRegistry("a", "b")
 	reg.record("a", time.Millisecond, nil)
 	reg.record("b", 2*time.Millisecond, errors.New("err"))
 	reg.record("a", 3*time.Millisecond, nil)
@@ -54,12 +55,12 @@ func TestStatsRegistry_MultipleResolvers(t *testing.T) {
 }
 
 func TestStatsRegistry_AverageZeroOnNoRequests(t *testing.T) {
-	reg := newStatsRegistry()
+	reg := newStatsRegistry("a")
 	require.Empty(t, reg.snapshot())
 }
 
 func TestStatsRegistry_Reset(t *testing.T) {
-	reg := newStatsRegistry()
+	reg := newStatsRegistry("a")
 	reg.record("a", time.Millisecond, nil)
 	require.NotEmpty(t, reg.snapshot())
 
@@ -72,13 +73,26 @@ func TestStatsRegistry_Reset(t *testing.T) {
 }
 
 func TestStatsRegistry_EmptyResolverNoop(t *testing.T) {
-	reg := newStatsRegistry()
+	reg := newStatsRegistry("a")
 	reg.record("", time.Millisecond, nil)
 	require.Empty(t, reg.snapshot(), "empty resolver should not create an entry")
 }
 
+// TestStatsRegistry_IgnoresUnconfigured guards the unbounded-growth bug: a
+// resolver outside the configured set must never create an entry.
+func TestStatsRegistry_IgnoresUnconfigured(t *testing.T) {
+	reg := newStatsRegistry("a")
+	for i := 0; i < 1000; i++ {
+		reg.record(fmt.Sprintf("198.51.100.%d:53", i%256), time.Millisecond, nil)
+	}
+	reg.record("a", time.Millisecond, nil)
+	snap := reg.snapshot()
+	require.Len(t, snap, 1)
+	require.Equal(t, uint64(1), snap["a"].Requests)
+}
+
 func TestStatsRegistry_ConcurrentRecord(t *testing.T) {
-	reg := newStatsRegistry()
+	reg := newStatsRegistry("r")
 	const goroutines = 50
 	const perGoroutine = 200
 
@@ -105,7 +119,7 @@ func TestStatsRegistry_ConcurrentRecord(t *testing.T) {
 }
 
 func TestStatsRegistry_SnapshotIsIndependent(t *testing.T) {
-	reg := newStatsRegistry()
+	reg := newStatsRegistry("r")
 	reg.record("r", time.Millisecond, nil)
 
 	snap1 := reg.snapshot()
@@ -211,4 +225,53 @@ func TestClient_TCPFallbackRecordsStats(t *testing.T) {
 	rs := client.Stats()[fr.Addr()]
 	require.Equal(t, uint64(2), rs.Requests, "the UDP query and its TCP retry are two attempts")
 	require.Equal(t, uint64(2), rs.Successes)
+}
+
+// TestClient_StatsIgnoreAdHocNameservers drives every path that can reach a
+// nameserver outside the configured list (QueryParallel, which Trace uses, and
+// an explicit per-call resolver, which AXFR and iterative callers use) and
+// checks that Stats only ever holds the configured resolver.
+func TestClient_StatsIgnoreAdHocNameservers(t *testing.T) {
+	answer := arecord(fakeHost, "203.0.113.10")
+	configured := newFakeResolver(t, dns.RcodeSuccess, answer)
+	adhoc1 := newFakeResolver(t, dns.RcodeSuccess, answer)
+	adhoc2 := newFakeResolver(t, dns.RcodeSuccess, answer)
+
+	client, err := NewWithOptions(Options{
+		BaseResolvers: []string{configured.Addr()},
+		MaxRetries:    1,
+		Timeout:       time.Second,
+	})
+	require.NoError(t, err)
+
+	_, err = client.QueryParallel(fakeHost, dns.TypeA, []string{adhoc1.Addr(), adhoc2.Addr()})
+	require.NoError(t, err)
+	_, err = client.QueryMultipleWithResolver(fakeHost, []uint16{dns.TypeA}, parseResolver(adhoc1.Addr()))
+	require.NoError(t, err)
+	require.Greater(t, adhoc1.queries.Load(), int64(0), "the ad-hoc server must really have been queried")
+	require.Empty(t, client.Stats(), "ad-hoc nameservers must not be recorded")
+
+	_, err = client.QueryMultiple(fakeHost, []uint16{dns.TypeA})
+	require.NoError(t, err)
+	stats := client.Stats()
+	require.Len(t, stats, 1)
+	require.Equal(t, uint64(1), stats[configured.Addr()].Requests)
+}
+
+// TestClient_TraceStatsBounded runs a real Trace, which walks the root and
+// TLD nameservers, and checks that none of them lands in Stats.
+func TestClient_TraceStatsBounded(t *testing.T) {
+	if testing.Short() {
+		t.Skip("network test skipped in -short mode")
+	}
+	client, err := New([]string{"1.1.1.1:53"}, 2)
+	require.NoError(t, err)
+
+	trace, err := client.Trace("scanme.sh", dns.TypeA, 10)
+	require.NoError(t, err)
+	require.NotEmpty(t, trace.DNSData, "trace must have walked some nameservers")
+
+	for key := range client.Stats() {
+		require.Equal(t, "1.1.1.1:53", key, "only the configured resolver may be tracked")
+	}
 }
