@@ -60,6 +60,7 @@ type Client struct {
 	dotClient   *dns.Client
 	proxyDialer proxy.ContextDialer
 	knownHosts  map[string][]string
+	stats       *statsRegistry
 }
 
 // New creates a new dns client
@@ -121,6 +122,7 @@ func NewWithOptions(options Options) (*Client, error) {
 		dohClient:  dohClient,
 		dotClient:  dotClient,
 		knownHosts: knownHosts,
+		stats:      newStatsRegistry(resolverKeys(parsedBaseResolvers)...),
 	}
 
 	if options.Proxy != "" {
@@ -200,7 +202,9 @@ func (c *Client) Do(msg *dns.Msg) (*dns.Msg, error) {
 		index := atomic.AddUint32(&c.serversIndex, 1)
 		resolver := c.resolvers[index%uint32(len(c.resolvers))]
 
+		attemptStart := time.Now()
 		resp, err = c.query(msg, resolver)
+		c.recordAttempt(resolver, attemptStart, err)
 		if err != nil || resp == nil {
 			continue
 		}
@@ -499,6 +503,7 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 			if !hasResolver {
 				resolver = c.resolvers[index%uint32(len(c.resolvers))]
 			}
+			attemptStart := time.Now()
 			if r, ok := resolver.(*NetworkResolver); ok && requestType == dns.TypeAXFR {
 				client := c.clientFor(r.Protocol)
 				if client == nil {
@@ -515,6 +520,7 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 			} else {
 				resp, err = c.query(msg, resolver)
 			}
+			c.recordAttempt(resolver, attemptStart, err)
 
 			if err != nil || (trResp == nil && resp == nil) {
 				continue
@@ -522,7 +528,9 @@ func (c *Client) queryMultiple(host string, requestTypes []uint16, resolver Reso
 
 			// https://github.com/projectdiscovery/retryabledns/issues/25
 			if resp != nil && resp.Truncated && c.TCPFallback {
+				attemptStart = time.Now()
 				resp, err = c.exchange(msg, TCP, resolver.String())
+				c.recordAttempt(resolver, attemptStart, err)
 				if err != nil || resp == nil {
 					continue
 				}
@@ -610,7 +618,10 @@ func (c *Client) QueryParallel(host string, requestType uint16, resolvers []stri
 		wg.Add(1)
 		go func(resolver string, dnsdata *DNSData) {
 			defer wg.Done()
-			resp, err := c.query(msg.Copy(), parseResolver(resolver))
+			r := parseResolver(resolver)
+			attemptStart := time.Now()
+			resp, err := c.query(msg.Copy(), r)
+			c.recordAttempt(r, attemptStart, err)
 			if err != nil {
 				return
 			}
